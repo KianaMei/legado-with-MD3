@@ -126,21 +126,22 @@ jobs:
       - name: Rename APKs
         run: |
           set -e
-          cd artifacts
-          shopt -s nullglob
-          for f in *.apk; do
+          mkdir -p out
+          shopt -s nullglob globstar
+          for f in $(find artifacts -name '*.apk' -type f); do
             case "$f" in
-              *appCore*|*appcore*) mv "$f" "legado-md3-${{ steps.ver.outputs.version }}-core.apk" ;;
-              *appComic*|*appcomic*) mv "$f" "legado-md3-${{ steps.ver.outputs.version }}-comic.apk" ;;
+              *appCore*|*app-core*) cp "$f" "out/legado-md3-${{ steps.ver.outputs.version }}-core.apk" ;;
+              *appComic*|*app-comic*) cp "$f" "out/legado-md3-${{ steps.ver.outputs.version }}-comic.apk" ;;
+              *) echo "::warning::unmatched apk: $f" ;;
             esac
           done
-          ls -la
+          ls -la out
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ steps.ver.outputs.tag }}" artifacts/*.apk \
+          gh release create "${{ steps.ver.outputs.tag }}" out/*.apk \
             --repo "${{ github.repository }}" \
             --title "Legado MD3 ${{ steps.ver.outputs.version }}" \
             --notes "Fork 构建（包名 io.legato.kazusa.md3，可与官方版本共存安装）。
