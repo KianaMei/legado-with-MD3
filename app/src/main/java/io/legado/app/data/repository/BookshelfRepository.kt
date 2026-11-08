@@ -44,6 +44,14 @@ class BookshelfRepository {
             else
                 list.sortedWith { o1, o2 -> o1.author.cnCompare(o2.author) }
 
+            BookSort.WORD_COUNT -> BookSort.compareByValue(list, isDescending) {
+                BookSort.wordCountOf(it.wordCount)
+            }
+
+            BookSort.SIZE -> BookSort.compareByValue(list, isDescending) {
+                BookSort.sizeBytes(it.bookUrl, it.isLocal)
+            }
+
             else -> if (isDescending) list.sortedByDescending { it.durChapterTime }
             else list.sortedBy { it.durChapterTime }
         }
