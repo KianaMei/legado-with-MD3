@@ -9,6 +9,7 @@ import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookProgress
 import io.legado.app.data.entities.BookSource
+import io.legado.app.data.repository.BookSort
 import io.legado.app.help.AppWebDav
 import io.legado.app.help.CacheManager
 import io.legado.app.help.book.BookHelp
@@ -32,6 +33,7 @@ import splitties.init.appCtx
 import java.io.File
 import java.util.WeakHashMap
 import java.util.concurrent.TimeUnit
+import kotlin.math.max
 
 object BookController {
 
@@ -50,14 +52,42 @@ object BookController {
             return if (books.isEmpty()) {
                 returnData.setErrorMsg("还没有添加小说")
             } else {
+                val isDescending = AppConfig.bookshelfSortOrder == 1
                 val data = when (AppConfig.bookshelfSort) {
-                    1 -> books.sortedByDescending { it.latestChapterTime }
-                    2 -> books.sortedWith { o1, o2 ->
-                        o1.name.cnCompare(o2.name)
+                    1 -> if (isDescending) books.sortedByDescending { it.latestChapterTime }
+                    else books.sortedBy { it.latestChapterTime }
+
+                    2 -> if (isDescending) {
+                        books.sortedWith { o1, o2 -> o2.name.cnCompare(o1.name) }
+                    } else {
+                        books.sortedWith { o1, o2 -> o1.name.cnCompare(o2.name) }
                     }
 
-                    3 -> books.sortedBy { it.order }
-                    else -> books.sortedByDescending { it.durChapterTime }
+                    3 -> if (isDescending) books.sortedByDescending { it.order }
+                    else books.sortedBy { it.order }
+
+                    4 -> if (isDescending) books.sortedByDescending {
+                        max(it.latestChapterTime, it.durChapterTime)
+                    } else books.sortedBy {
+                        max(it.latestChapterTime, it.durChapterTime)
+                    }
+
+                    5 -> if (isDescending) {
+                        books.sortedWith { o1, o2 -> o2.author.cnCompare(o1.author) }
+                    } else {
+                        books.sortedWith { o1, o2 -> o1.author.cnCompare(o2.author) }
+                    }
+
+                    BookSort.WORD_COUNT -> BookSort.compareByValue(books, isDescending) {
+                        BookSort.parseWordCount(it.wordCount)
+                    }
+
+                    BookSort.SIZE -> BookSort.compareByValue(books, isDescending) {
+                        BookSort.sizeBytes(it.bookUrl, it.name, it.isLocal)
+                    }
+
+                    else -> if (isDescending) books.sortedByDescending { it.durChapterTime }
+                    else books.sortedBy { it.durChapterTime }
                 }
                 returnData.setData(data)
             }

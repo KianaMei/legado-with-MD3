@@ -10,6 +10,7 @@ import io.legado.app.data.entities.BookGroup
 import io.legado.app.data.entities.BookSource
 import io.legado.app.data.repository.BookGroupRepository
 import io.legado.app.data.repository.BookRepository
+import io.legado.app.data.repository.BookSort
 import io.legado.app.data.repository.SearchRepository
 import io.legado.app.domain.usecase.BatchCacheDownloadUseCase
 import io.legado.app.domain.usecase.BatchChangeSourceCandidate
@@ -41,6 +42,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -368,10 +370,24 @@ class BookshelfManageScreenViewModel(
                         max(it.latestChapterTime, it.durChapterTime)
                     }
 
+                    5 -> if (isDescending) {
+                        booksDownload.sortedWith { o1, o2 -> o2.author.cnCompare(o1.author) }
+                    } else {
+                        booksDownload.sortedWith { o1, o2 -> o1.author.cnCompare(o2.author) }
+                    }
+
+                    BookSort.WORD_COUNT -> BookSort.compareByValue(
+                        booksDownload, isDescending
+                    ) { BookSort.parseWordCount(it.wordCount) }
+
+                    BookSort.SIZE -> BookSort.compareByValue(
+                        booksDownload, isDescending
+                    ) { BookSort.sizeBytes(it.bookUrl, it.name, it.isLocal) }
+
                     else -> if (isDescending) booksDownload.sortedByDescending { it.durChapterTime }
                     else booksDownload.sortedBy { it.durChapterTime }
                 }
-            }.collect { (bookSort, books) ->
+            }.flowOn(Dispatchers.Default).collect { (bookSort, books) ->
                 _uiState.update {
                     it.copy(
                         books = books,
