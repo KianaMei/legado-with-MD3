@@ -61,7 +61,8 @@ android {
     }
 
     defaultConfig {
-        applicationId = "io.legato.kazusa"
+        // Fork 专属包名：与官方 io.legato.kazusa 并存安装，互不覆盖。
+        applicationId = "io.legato.kazusa.md3"
         minSdk = 26
         targetSdk = 37
         versionCode = System.getenv("COMMIT_NUMBER")?.toInt()?.let { 10000 + it } ?: 32640

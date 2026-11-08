@@ -1,0 +1,154 @@
+name: Fork Release APK
+
+# 手动触发：构建带自有签名的 release APK，发布到 GitHub Releases 供直接下载。
+# 包名为 io.legato.kazusa.md3，可与官方 io.legato.kazusa 并存安装。
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: '产品变体'
+        required: true
+        type: choice
+        options:
+          - both
+          - core
+          - comic
+        default: both
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        product: ${{ fromJSON(inputs.product == 'both' && '["core","comic"]' || format('["{0}"]', inputs.product)) }}
+    runs-on: ubuntu-latest
+    env:
+      PRODUCT: ${{ matrix.product }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Clear 18PlusList.txt
+        run: echo "" > "$GITHUB_WORKSPACE/app/src/main/assets/18PlusList.txt"
+
+      - name: Remove Aliyun mirrors (unreliable in CI)
+        run: sed -i '/maven.aliyun.com/d' settings.gradle
+
+      - name: Decode signing keystore
+        shell: bash
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | base64 -d > "$GITHUB_WORKSPACE/app/my-release-key.jks"
+          {
+            echo ""
+            echo "RELEASE_STORE_FILE=my-release-key.jks"
+            echo "RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}"
+            echo "RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }}"
+            echo "RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}"
+          } >> "$GITHUB_WORKSPACE/gradle.properties"
+
+      - name: Resolve version
+        run: |
+          MAJOR=$(grep VERSION_MAJOR app/version.properties | cut -d= -f2 | tr -d '[:space:]')
+          MINOR=$(grep VERSION_MINOR app/version.properties | cut -d= -f2 | tr -d '[:space:]')
+          PATCH=$(grep VERSION_PATCH app/version.properties | cut -d= -f2 | tr -d '[:space:]')
+          echo "APP_VERSION_NAME=${MAJOR}.${MINOR}.${PATCH}-md3.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "COMMIT_NUMBER=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Build and sign release APK
+        run: |
+          chmod +x gradlew
+          PRODUCT_CAP=$(echo "$PRODUCT" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+          # 关闭 ABI 分包，只产出一个 universal APK，便于直接下载安装
+          ./gradlew assembleApp${PRODUCT_CAP}Release \
+            -PenableAbiSplits=false \
+            --no-daemon \
+            --no-configuration-cache
+
+      - name: Verify APK is signed
+        run: |
+          PRODUCT_CAP=$(echo "$PRODUCT" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+          APK_DIR="$GITHUB_WORKSPACE/app/build/outputs/apk/app${PRODUCT_CAP}/release"
+          APK=$(find "$APK_DIR" -name "*.apk" -print -quit)
+          if [ -z "$APK" ]; then
+            echo "::error::APK not found in $APK_DIR"
+            exit 1
+          fi
+          echo "APK: $APK"
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BUILD_TOOLS/apksigner" verify --print-certs "$APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-apk-${{ matrix.product }}
+          if-no-files-found: error
+          path: app/build/outputs/apk/app*/release/*.apk
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fork-apk-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Resolve version and tag
+        id: ver
+        run: |
+          MAJOR=$(grep VERSION_MAJOR app/version.properties | cut -d= -f2 | tr -d '[:space:]')
+          MINOR=$(grep VERSION_MINOR app/version.properties | cut -d= -f2 | tr -d '[:space:]')
+          PATCH=$(grep VERSION_PATCH app/version.properties | cut -d= -f2 | tr -d '[:space:]')
+          echo "version=${MAJOR}.${MINOR}.${PATCH}-md3.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "tag=md3-${MAJOR}.${MINOR}.${PATCH}-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Rename APKs
+        run: |
+          set -e
+          cd artifacts
+          shopt -s nullglob
+          for f in *.apk; do
+            case "$f" in
+              *appCore*|*appcore*) mv "$f" "legado-md3-${{ steps.ver.outputs.version }}-core.apk" ;;
+              *appComic*|*appcomic*) mv "$f" "legado-md3-${{ steps.ver.outputs.version }}-comic.apk" ;;
+            esac
+          done
+          ls -la
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" artifacts/*.apk \
+            --repo "${{ github.repository }}" \
+            --title "Legado MD3 ${{ steps.ver.outputs.version }}" \
+            --notes "Fork 构建（包名 io.legato.kazusa.md3，可与官方版本共存安装）。
+
+          包含书架「按字数」「按大小」排序。
+
+          - core：基础包
+          - comic：漫画增强版（内置本地 OCR/擦除/气泡检测）
+
+          签名：fork 自有签名，与官方不同。" \
+            --prerelease
