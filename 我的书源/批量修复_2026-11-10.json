@@ -1,0 +1,197 @@
+[
+ {
+  "bookSourceGroup": "搜索链接规则为空",
+  "bookSourceName": "古龙武侠网",
+  "bookSourceType": 0,
+  "bookSourceUrl": "https://gulongbbs.com/book/",
+  "bookUrlPattern": "",
+  "customButton": false,
+  "customOrder": 215,
+  "enabled": true,
+  "enabledCookieJar": false,
+  "enabledExplore": true,
+  "eventListener": false,
+  "exploreUrl": "古龙全集::https://gulongbbs.com/book/\n金庸全集::https://gulongbbs.com/jinyong/\n武侠全集::https://gulongbbs.com/wuxia/",
+  "lastUpdateTime": 1754727554352,
+  "loginUrl": "https://gulongbbs.com/",
+  "respondTime": 543,
+  "ruleBookInfo": {
+   "author": "tag.title@text##(.*?)《.*?》##$1###",
+   "canReName": "1",
+   "coverUrl": "class.ctr@tag.img@src",
+   "intro": "class.ctr@html",
+   "name": "tag.title@text##《(.*?)》|([^《]+)_.*##$1$2###"
+  },
+  "ruleContent": {
+   "content": "<js>\ncontent = java.getString(\"@@class.articleContent@html||id.Article@class.content@html||class.t_msgfont@html||id.new@html||class.t_f@html||tag.fieldset@html||tag.span@p@html\");\n\nif(content!=\"\"){\n\tresult = content\n\t}else{\n\tif(book.durChapterIndex === chapter.index){\n\t\turl = baseUrl;\n\t\ttitle = \"{{chapter.title}}\";\n\t\turl = \"legado://import/addToBookshelf?src=\"+encodeURIComponent(url);\n\t\thtml = `<!DOCTYPE html>\n<html>\n<head>\n    <title>《${title}》加入书架</title>\n    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">\n</head>\n<body> \n        <div class=\"book-title\">《${title}》<a href=\"${url}\" class=\"action-button\">点击加入书架</a></div>         \n    <script>\n        window.onload = function () {\n            window.location.href = '${url}';\n        };\n    </script>\n</body>\n</html>\n`;\t\t\n\t\tscript = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;\n\t\tjava.startBrowser(script,\"《\"+title+\"》\");\n\t}\n\tresult = \"刷新正文跳转加入书架页面\"\n\t\t}\n</js>",
+   "imageStyle": "FULL",
+   "nextContentUrl": "text.下一页@href"
+  },
+  "ruleExplore": {
+   "bookList": "id.customers@tr@td",
+   "bookUrl": "tag.a.0@href",
+   "name": "text##^[A-Z]$"
+  },
+  "ruleSearch": {
+   "author": "h4.blue@text||div.ui-pagetitle@text##(.*?)《.*?》##$1###",
+   "name": "h4.blue@text||div.ui-pagetitle@text##《(.*?)》##$1###"
+  },
+  "ruleToc": {
+   "chapterList": "//ul[@class=\"list lh24 f14\"]//a||//*[class=\"alt\"]//a||//*[@id=\"customers\"]//td||//*[@bgcolor=\"FFFFFF\"]//a||//*[@bgcolor=\"#ffffff\"]//a||//*[@bgcolor=\"#FFFFFF\"]//a[@href]||//body",
+   "chapterName": "class.main_ArticleTitle@text||tag.a@text",
+   "chapterUrl": "a@href||href##\\.html\\.html##.html",
+   "updateTime": "tag.span@text"
+  },
+  "weight": 0
+ },
+ {
+  "bookSourceComment": "// Error: 搜索失效",
+  "bookSourceGroup": "公众号开源书源",
+  "bookSourceName": "宝来小说",
+  "bookSourceType": 0,
+  "bookSourceUrl": "http://m.baolaixsw.com",
+  "bookUrlPattern": "",
+  "customButton": false,
+  "customOrder": 432,
+  "enabled": true,
+  "enabledCookieJar": true,
+  "enabledExplore": true,
+  "eventListener": false,
+  "exploreUrl": "全部分类::/allsort/{{page}}.html\n玄幻奇幻::/xuanhuan/{{page}}.html\n武侠仙侠::/wuxia/{{page}}.html\n都市生活::/dushi/{{page}}.html\n历史军事::/lishi/{{page}}.html\n游戏竞技::/youxi/{{page}}.html\n科幻未来::/kehuan/{{page}}.html\n恐怖悬疑::/xuanyi/{{page}}.html\n其他类型::/qita/{{page}}.html\n古代言情::/guyan/{{page}}.html\n现代言情::/xianyan/{{page}}.html\n幻想奇缘::/huanqing/{{page}}.html\n游戏情缘::/zongcai/{{page}}.html\n浪漫青春::/qingchun/{{page}}.html\n言情美文::/wangluo/{{page}}.html\n科幻灵异::/mmkehuan/{{page}}.html\n其他类型::/mmqita/{{page}}.html\n全部完结小说::/quanben/all/{{page}}.html\n玄幻奇幻全本::/quanben/xuanhuan/{{page}}.html\n武侠仙侠全本::/quanben/wuxia/{{page}}.html\n都市生活全本::/quanben/dushi/{{page}}.html\n历史军事全本::/quanben/lishi/{{page}}.html\n游戏竞技全本::/quanben/youxi/{{page}}.html\n科幻未来全本::/quanben/kehuan/{{page}}.html\n恐怖悬疑全本::/quanben/xuanyi/{{page}}.html\n其他类型全本::/quanben/qita/{{page}}.html\n古代言情全本::/quanben/guyan/{{page}}.html\n现代言情全本::/quanben/xianyan/{{page}}.html\n幻想奇缘全本::/quanben/huanqing/{{page}}.html\n游戏情缘全本::/quanben/zongcai/{{page}}.html\n浪漫青春全本::/quanben/qingchun/{{page}}.html\n言情美文全本::/quanben/wangluo/{{page}}.html\n科幻灵异全本::/quanben/mmkehuan/{{page}}.html\n其他类型全本::/quanben/mmqita/{{page}}.html",
+  "header": "@js:\nJSON.stringify({\n\t\"referer\": source.getKey(),\n\"x-requested-with\": \"mark.via\",\n\"accept-language\": \"zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7\",\n\"user-agent\": \"Mozilla/5.0 (Linux; Android 10; PACM00 Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.5359.79 Mobile Safari/537.36\"})",
+  "lastUpdateTime": 1720204788882,
+  "respondTime": 192962,
+  "ruleBookInfo": {
+   "author": "@get:{a}",
+   "coverUrl": "@get:{c}##https##http",
+   "init": "@put:{n:\"[property$=book_name]@content\",\na:\"[property$=author]@content\",\nk:\"[property~=category|status|update_time]@content\",\nw:\".detail span.-1@text\",\nl:\"[property$=latest_chapter_name]@content\",\ni:\"[property$=description]@content\",\nc:\"[property$=image]@content\",\nu:\"li.now a@href\"}",
+   "intro": "@get:{i}##.*观看小说:",
+   "kind": "@get:{k}",
+   "lastChapter": "@get:{l}",
+   "name": "@get:{n}",
+   "tocUrl": "@get:{u}",
+   "wordCount": "@get:{w}"
+  },
+  "ruleContent": {
+   "content": ".content>p!-1@textNodes",
+   "nextContentUrl": "text.下一页@href"
+  },
+  "ruleExplore": {},
+  "ruleSearch": {
+   "author": "a.2@text",
+   "bookList": "ul.list li",
+   "bookUrl": "a.1@href",
+   "checkKeyWord": "剑来",
+   "coverUrl": "img@src##https##http",
+   "intro": "p.intro@text",
+   "kind": "span.0:1@text",
+   "lastChapter": "a.-1@text",
+   "name": "a.1@text"
+  },
+  "ruleToc": {
+   "chapterList": "ul.read li a",
+   "chapterName": "text",
+   "chapterUrl": "href",
+   "nextTocUrl": "option@value||text.下一页@href"
+  },
+  "searchUrl": "/search.html,{\n  \"body\": \"searchkey={{key}}\",\n  \"method\": \"POST\"\n}",
+  "weight": 0
+ },
+ {
+  "bookSourceGroup": "搜索链接规则为空",
+  "bookSourceName": "古龙武侠网m",
+  "bookSourceType": 0,
+  "bookSourceUrl": "https://m.gulongbbs.com/",
+  "bookUrlPattern": "",
+  "customButton": false,
+  "customOrder": 452,
+  "enabled": true,
+  "enabledCookieJar": false,
+  "enabledExplore": true,
+  "eventListener": false,
+  "exploreUrl": "古龙全集::/book/\n金庸全集::/jinyong/\n武侠全集::/wuxia/",
+  "lastUpdateTime": 1759605115752,
+  "loginUrl": "https://www.gulongbbs.com/",
+  "respondTime": 290,
+  "ruleBookInfo": {
+   "author": "tag.title@text##(.*?)《.*?》##$1###",
+   "canReName": "1",
+   "coverUrl": "class.ctr@tag.img@src",
+   "init": "@js:\nif(/window.location.href='[^']+';/.test(result)){\n\t  re = result.match(/window.location.href='([^']+)';/)[1];\n\t  if(/www/.test(re)){\n\t  \t   re = re.replace(/www/,'m');\n\t  \t}\n\t  java.put(\"url\",re);\n   url = /\\/\\/m\\./.test(re)?re:source.key+re.replace(/^\\//,'');\n   result = java.ajax(url)\n}\nresult",
+   "intro": "class.ctr@html",
+   "name": "tag.title@text##《(.*?)》|([^《]+)_.*##$1$2###",
+   "tocUrl": "@js:\n\nif(java.get(\"url\")){\n   result = java.get(\"url\")\n}\nresult"
+  },
+  "ruleContent": {
+   "content": "<js>\ncontent = java.getString(\"@@class.articleContent@html||id.Article@class.content@html||class.t_msgfont@html||id.new@html||class.t_f@html||tag.fieldset@html||tag.span@p@html\");\nif(content!=\"\"){\n\tresult = content\n\t}else{\n\tif(book.durChapterIndex === chapter.index){\n\t\t\n\t\turl = baseUrl;\n\t\tjava.log(url)\n\t\ttitle = \"{{chapter.title}}\";\n\t\turl = \"legado://import/addToBookshelf?src=\"+encodeURIComponent(url);\n\t\thtml = `<!DOCTYPE html>\n<html>\n<head>\n    <title>《${title}》加入书架</title>\n    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">\n</head>\n<body> \n        <div class=\"book-title\">《${title}》<a href=\"${url}\" class=\"action-button\">点击加入书架</a></div>         \n    <script>\n        window.onload = function () {\n            window.location.href = '${url}';\n        };\n    </script>\n</body>\n</html>\n`;\t\t\n\t\tscript = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;\n\t\tjava.startBrowser(script,\"《\"+title+\"》\");\n\t}\n\tresult = \"刷新正文跳转加入书架页面\"\n\t\t}\n</js>",
+   "imageStyle": "FULL",
+   "nextContentUrl": "text.下一页@href"
+  },
+  "ruleExplore": {
+   "bookList": "id.customers@tr@td",
+   "bookUrl": "tag.a.0@href",
+   "name": "text##^[A-Z]$"
+  },
+  "ruleSearch": {
+   "author": "h4.blue@text||div.ui-pagetitle@text##(.*?)《.*?》##$1###",
+   "name": "h4.blue@text||div.ui-pagetitle@text##《(.*?)》##$1###"
+  },
+  "ruleToc": {
+   "chapterList": "//ul[@class=\"list lh24 f14\"]//a||//*[class=\"alt\"]//a||//*[@id=\"customers\"]//td||//*[@bgcolor=\"FFFFFF\"]//a||//*[@bgcolor=\"#ffffff\"]//a||//*[@bgcolor=\"#FFFFFF\"]//a[@href]||//a[@class=\"1\"]||//body",
+   "chapterName": "class.main_ArticleTitle@text||tag.a@text",
+   "chapterUrl": "a@href||href##\\.html\\.html##.html",
+   "isVolume": "tag.b@text",
+   "nextTocUrl": "text.下一页@href",
+   "updateTime": "tag.span@text"
+  },
+  "weight": 0
+ },
+ {
+  "bookSourceComment": "//by: youke2580\n//类型：文本 在线阅读\n//切换：文件 可以下载",
+  "bookSourceGroup": "源仓库,小说 书源",
+  "bookSourceName": "爱去小说（导入）",
+  "bookSourceType": 3,
+  "bookSourceUrl": "https://www.aiqu2727.com",
+  "bookUrlPattern": "",
+  "customButton": false,
+  "customOrder": 3067,
+  "enabled": true,
+  "enabledCookieJar": true,
+  "enabledExplore": true,
+  "eventListener": false,
+  "exploreUrl": "耽美小说::/da/dm.htm\n最新小说::/txt-xx/new/index_{{page}}.htm\n全部耽美::/txt-xx/15/list15_{{page}}.htm\n现代耽美::/txt-xx/dmxs/xddm/list117_{{page}}.htm\n古代架空::/txt-xx/dmxs/gdjk/list118_{{page}}.htm\n穿越重生::/txt-xx/dmxs/cycs/list119_{{page}}.htm\n玄幻科幻::/txt-xx/dmxs/xhkh/list120_{{page}}.htm\nBL同人::/txt-xx/dmxs/bltr/list121_{{page}}.htm\nGL百合::/txt-xx/dmxs/glbh/list122_{{page}}.htm\n网游竞技::/list.html?label=%E7%BD%91%E6%B8%B8\n女生小说::/txt-xx/nsxs/list109_{{page}}.htm\n都市言情::/txt-xx/nsxs/dsyq/list110_{{page}}.htm\n古代言情::/txt-xx/nsxs/gdyq/list111_{{page}}.htm\n穿越重生::/txt-xx/nsxs/cycs/list112_{{page}}.htm\n玄幻仙侠::/txt-xx/nsxs/xhxx/list113_{{page}}.htm\n青春同人::/txt-xx/nsxs/qctr/list114_{{page}}.htm\n网游科幻::/txt-xx/nsxs/wykh/list115_{{page}}.htm\n男生小说::/txt-xx/nsbook/list123_{{page}}.htm\n玄幻奇幻::/txt-xx/nsbook/xhqh/list124_{{page}}.htm\n武侠仙侠::/txt-xx/nsbook/wxxx/list125_{{page}}.htm\n都市重生::/txt-xx/nsbook/dscs/list126_{{page}}.htm\n历史军事::/txt-xx/nsbook/lsjs/list127_{{page}}.htm\n恐怖推理::/txt-xx/nsbook/kbtl/list128_{{page}}.htm\n科幻网游::/txt-xx/nsbook/khwy/list129_{{page}}.htm\n二次元::/txt-xx/nsbook/ecy/list130_{{page}}.htm\n军事小说::/txt-xx/25/list25_{{page}}.htm\n历史小说::/txt-xx/25/list25_{{page}}.htm\n名人传记::/txt-xx/22/list22_{{page}}.htm\n中外名著::/txt-xx/28/list28_{{page}}.htm\n社科历史::/txt-xx/25/list25_{{page}}.htm\n政治军事::/txt-xx/25/list25_{{page}}.htm\n当代文学::/txt-xx/27/list27_{{page}}.htm\n成功励志::/txt-xx/22/list22_{{page}}.htm\n其他小说::/txt-xx/30/list30_{{page}}.htm\n推理悬疑::/txt-xx/16/list16_{{page}}.htm\n战争政治::/txt-xx/25/list25_{{page}}.htm\n科幻想象::/txt-xx/25/list25_{{page}}.htm\n浪漫爱情::/txt-xx/19/list19_{{page}}.htm\n文学名著::/txt-xx/28/list28_{{page}}.htm",
+  "header": "{\"User-Agent\": \"Mozilla/5.0 (Linux; Android 9) Mobile Safari/537.36\"}",
+  "lastUpdateTime": 1731392015082,
+  "respondTime": 4385,
+  "ruleBookInfo": {
+   "author": "text.作者名称：@font.0@text",
+   "downloadUrls": "center p a.0@href\n<js>\nvar url=book.origin+result[0];\nresult=java.ajax(url);\nresult;\n</js>\ntext.下载地址@href",
+   "intro": "[style~=padding]@textNodes",
+   "name": "text.书名：@text##书名：",
+   "tocUrl": "center p a.0@href\n<js>\nvar url=book.origin+result;\nresult=java.ajax(url);\nresult;\n</js>\ntext.在线阅读@href"
+  },
+  "ruleContent": {
+   "content": ".layui-code@html"
+  },
+  "ruleExplore": {
+   "bookList": ".mainSoftName||li.mainlist_li",
+   "bookUrl": "a.1@href||a@href",
+   "kind": ".list_class a@text",
+   "name": "a@title||a@text"
+  },
+  "ruleSearch": {
+   "bookList": ".searchTopic&&.searchInfo",
+   "bookUrl": "a.0@href",
+   "checkKeyWord": "快穿",
+   "kind": "span.1@text",
+   "name": "a.0@text"
+  },
+  "ruleToc": {
+   "chapterList": "@js:\nvar page=src.match(/第\\d+页.*共(\\d+).+页/)[1];\nvar url=java.getString(\"@@text.首页.0@href\")\nvar surl=String(url);\nvar list=[{text:\"第1页\",href:baseUrl}];\nif(page){\n\tfor(i=2;i<=page;i++){\n\t\tlist.push({text:`第${i}页`,href:surl.replace(/page=1/,\"page=\"+i)})\n\t\t}\n\t\tlist;\n\t}",
+   "chapterName": "text",
+   "chapterUrl": "href"
+  },
+  "searchUrl": "/search.asp?page={{page}}&m=0&act=&classid=0&word={{key}},{\n  \"charset\": \"GB2312\",\n  \"method\": \"GET\"\n}",
+  "weight": 0
+ }
+]
