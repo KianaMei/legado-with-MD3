@@ -34,7 +34,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuOpen
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -68,9 +67,11 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -97,10 +98,12 @@ import io.legado.app.ui.main.my.PrefClickEvent
 import io.legado.app.ui.main.rss.RssRouteScreen
 import io.legado.app.ui.theme.ComposeEngine
 import io.legado.app.ui.theme.LegadoTheme
+import io.legado.app.ui.theme.LocalAppUiConfiguration
 import io.legado.app.ui.theme.LocalBottomOverlayPadding
 import io.legado.app.ui.theme.LocalMiuixBarBackdrop
 import io.legado.app.ui.theme.ProvideAppContentColor
 import io.legado.app.ui.widget.components.mochi.AppMochiNavigationBar
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import ui.feice.mochi.basic.MochiTabItem
 import ui.feice.mochi.effect.glass.LocalMochiBackdrop
@@ -108,21 +111,32 @@ import ui.feice.mochi.effect.glass.rememberMochiBackdrop
 import ui.feice.mochi.effect.glass.mochiBackdropSource
 import top.yukonga.miuix.kmp.blur.layerBackdrop as miuixLayerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop as rememberMiuixLayerBackdrop
+import top.yukonga.miuix.kmp.glass.GlassNavigationBar
+import top.yukonga.miuix.kmp.glass.GlassNavigationBarDefaults
+import top.yukonga.miuix.kmp.glass.GlassNavigationItem
+import com.itos.coui.backdrop.couiBackdrop
+import com.itos.coui.backdrop.rememberCouiBackdrop
+import io.legado.app.ui.theme.ThemeResolver
 import io.legado.app.ui.widget.components.AppScaffold
 import io.legado.app.ui.widget.components.FloatingBottomBar
 import io.legado.app.ui.widget.components.FloatingBottomBarItem
 import io.legado.app.ui.widget.components.GlassDefaults
 import io.legado.app.ui.widget.components.button.series.MediumTonalButton
+import io.legado.app.ui.widget.components.coui.CouiFloatingNavigation
+import io.legado.app.ui.widget.components.coui.LocalCouiFloatingNavigation
+import io.legado.app.ui.widget.components.coui.rememberCouiCapsuleRenderer
 import io.legado.app.ui.widget.components.icon.AppIcon
 import io.legado.app.ui.widget.components.icon.AppIcons
-import io.legado.app.ui.widget.components.menuItem.RoundDropdownMenu
-import io.legado.app.ui.widget.components.menuItem.RoundDropdownMenuItem
+import io.legado.app.ui.widget.components.menu.AppAction
+import io.legado.app.ui.widget.components.menu.AppActionGroup
+import io.legado.app.ui.widget.components.menu.AppActionMenu
 import io.legado.app.ui.widget.components.navigation.AppNavigationBar
 import io.legado.app.ui.widget.components.navigation.AppNavigationBarItem
 import io.legado.app.ui.widget.components.pager.rememberPagerFlingPassThroughConnection
 import io.legado.app.ui.widget.components.text.AppText
 import io.legado.app.utils.sendToClip
 import io.legado.app.utils.startActivityForBook
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
@@ -274,10 +288,13 @@ fun MainScreen(
     }
     val labelVisibilityMode = mainUiState.labelVisibilityMode
     val isUnlabeled = labelVisibilityMode == "unlabeled"
+    val engine = LegadoTheme.composeEngine
+    val isCoui = engine == ComposeEngine.Coui
     val useFloatingBottomBar =
         shouldUseHomePlaybackCapsule(
             onMainRoute = true, showBottomView = mainUiState.showBottomView,
-            useFloatingBottomBar = mainUiState.useFloatingBottomBar, useRail = useRail,
+            useFloatingBottomBar = ThemeResolver.useFloatingBottomBar(engine, mainUiState.useFloatingBottomBar),
+            useRail = useRail,
         )
     val useLiquidGlass = useFloatingBottomBar &&
             mainUiState.useFloatingBottomBarLiquidGlass &&
@@ -285,9 +302,24 @@ fun MainScreen(
     var floatingFooterHeight by remember { mutableStateOf(0.dp) }
     val alwaysShowLabel = labelVisibilityMode == "labeled"
     val showLabel = !isUnlabeled
-    val engine = LegadoTheme.composeEngine
     val isMochi = engine == ComposeEngine.Mochi
+    val themeSettings = LocalAppUiConfiguration.current.theme
+    val useMiuixGlassNavigation = engine == ComposeEngine.Miuix && useLiquidGlass &&
+        themeSettings.useHyperOs4Components
     val mochiPageBackdrop = if (isMochi && useLiquidGlass) rememberMochiBackdrop(LegadoTheme.colorScheme.background) else null
+    val pageBackground = LegadoTheme.colorScheme.background
+    val couiNavigation = if (isCoui && useLiquidGlass &&
+        pageBackground.alpha == 1f && ThemeResolver.isCouiSupported()
+    ) {
+        val renderer = rememberCouiCapsuleRenderer()
+        if (renderer != null) {
+            val pageBackdrop = rememberCouiBackdrop {
+                drawRect(pageBackground)
+                drawContent()
+            }
+            remember(pageBackdrop, renderer) { CouiFloatingNavigation(pageBackdrop, renderer) }
+        } else null
+    } else null
     val miuixPageBackdrop = if (engine == ComposeEngine.Miuix && useLiquidGlass) {
         rememberMiuixLayerBackdrop {
             drawRect(floatingBarSurfaceColor)
@@ -398,7 +430,8 @@ fun MainScreen(
                             )
                             if (destination == MainDestination.Bookshelf && showGroupMenu) {
                                 BookshelfRailGroupMenuRoute(
-                                    expanded = showGroupMenu,
+                                    scope = coroutineScope,
+                                    modifier = Modifier.matchParentSize(),
                                     onDismissRequest = { showGroupMenu = false },
                                     onBeforeSelectGroup = {
                                         if (pagerState.currentPage != index) {
@@ -489,7 +522,8 @@ fun MainScreen(
 
                                 if (destination == MainDestination.Bookshelf && showGroupMenu) {
                                     BookshelfRailGroupMenuRoute(
-                                        expanded = showGroupMenu,
+                                        scope = coroutineScope,
+                                        modifier = Modifier.matchParentSize(),
                                         onDismissRequest = { showGroupMenu = false },
                                         onBeforeSelectGroup = {
                                             if (pagerState.currentPage != index) {
@@ -576,6 +610,7 @@ fun MainScreen(
                         when {
                             floatingBarBackdrop != null -> Modifier.layerBackdrop(floatingBarBackdrop)
                             miuixPageBackdrop != null -> Modifier.miuixLayerBackdrop(miuixPageBackdrop)
+                            couiNavigation != null -> Modifier.couiBackdrop(couiNavigation.backdrop)
                             else -> Modifier
                         },
                     ),
@@ -729,6 +764,7 @@ fun MainScreen(
                     CompositionLocalProvider(
                         LocalMochiBackdrop provides mochiPageBackdrop,
                         LocalMiuixBarBackdrop provides miuixPageBackdrop,
+                        LocalCouiFloatingNavigation provides couiNavigation,
                     ) {
                         FloatingNavigationContainer(
                             modifier = Modifier.align(Alignment.BottomCenter),
@@ -747,9 +783,11 @@ fun MainScreen(
                             val navigationAvailableWidth =
                                 (maxWidth - capsuleReserve).coerceAtLeast(0.dp)
                             // 保留原导航项的自然宽度和居中位置，不把没有胶囊的底栏拉满。
-                            val normalNavigationWidth =
-                                (MainNavigationTabMinWidth * destinations.size + 8.dp)
-                                    .coerceAtMost(navigationAvailableWidth)
+                            val normalNavigationWidth = (if (isCoui) {
+                                78.dp * destinations.size + 16.dp
+                            } else {
+                                MainNavigationTabMinWidth * destinations.size + 8.dp
+                            }).coerceAtMost(navigationAvailableWidth)
                             val navigationStartInset =
                                 (navigationAvailableWidth - normalNavigationWidth) / 2
                             val expandedCapsuleWidth = (maxWidth - ReadAloudBarCapsuleSize - gap)
@@ -758,6 +796,10 @@ fun MainScreen(
                                     (expandedCapsuleWidth - ReadAloudBarCapsuleSize) * expansion
                             val navigationWidth = normalNavigationWidth +
                                     (ReadAloudBarCapsuleSize.coerceAtMost(maxWidth) - normalNavigationWidth) * expansion
+                            val hasCustomIcons = destinations.any { destination ->
+                                mainUiState.customIconPath(destination).isNotEmpty() ||
+                                    mainUiState.selectedCustomIconPath(destination).isNotEmpty()
+                            }
                             if (isMochi && !playbackControlsExpanded && expansion <= 0f) {
                                 AppMochiNavigationBar(
                                     mochiTabs, pagerState.targetPage, onMochiTabSelect,
@@ -766,13 +808,44 @@ fun MainScreen(
                                     showLabel = showLabel, alwaysShowLabel = alwaysShowLabel,
                                     floating = true, glass = useLiquidGlass,
                                 )
+                            } else if (useMiuixGlassNavigation && !hasCustomIcons &&
+                                !playbackControlsExpanded && expansion <= 0f
+                            ) {
+                                val selectedIndex = pagerState.targetPage
+                                GlassNavigationBar(
+                                    items = destinations.mapIndexed { index, destination ->
+                                        val label = stringResource(destination.labelId)
+                                        val selected = selectedIndex == index
+                                        GlassNavigationItem(
+                                            icon = AppIcons.mainDestination(destination, selected),
+                                            label = label.takeIf { showLabel && (alwaysShowLabel || selected) },
+                                            contentDescription = label,
+                                        )
+                                    },
+                                    selectedIndex = selectedIndex,
+                                    onSelect = { index ->
+                                        destinations.getOrNull(index)?.let { handleMainDestinationClick(index, it) }
+                                    },
+                                    backdrop = miuixPageBackdrop,
+                                    modifier = Modifier.align(Alignment.BottomStart)
+                                        .offset(x = navigationStartInset).width(navigationWidth),
+                                    defaultWindowInsetsPadding = false,
+                                    height = 64.dp,
+                                    alpha = themeSettings.bottomBarBlurAlpha.coerceIn(0, 100) / 100f,
+                                    material = GlassNavigationBarDefaults.material().copy(
+                                        blurRadius = themeSettings.bottomBarBlurRadius.coerceAtLeast(0).dp,
+                                    ),
+                                    selectedColor = LegadoTheme.colorScheme.primary,
+                                )
                             } else FloatingBottomBar(
                                 modifier = Modifier
                                     .align(Alignment.BottomStart)
                                     .offset {
                                         IntOffset(
                                             x = (navigationStartInset * (1f - expansion)).roundToPx(),
-                                            y = 0,
+                                            y = if (isCoui && readAloudCapsuleShown) {
+                                                (-4.dp * (1f - expansion)).roundToPx()
+                                            } else 0,
                                         )
                                     }
                                     .width(navigationWidth),
@@ -793,10 +866,7 @@ fun MainScreen(
                                 backdrop = floatingBarBackdrop,
                                 tabsCount = destinations.size,
                                 isBlurEnabled = useLiquidGlass,
-                                hasCustomIcons = destinations.any { dest ->
-                                    mainUiState.customIconPath(dest).isNotEmpty() ||
-                                            mainUiState.selectedCustomIconPath(dest).isNotEmpty()
-                                }
+                                hasCustomIcons = hasCustomIcons,
                             ) {
                                 destinations.forEachIndexed { index, destination ->
                                     val selected = pagerState.targetPage == index
@@ -804,14 +874,19 @@ fun MainScreen(
                                     val selectedCustomIconPath =
                                         mainUiState.selectedCustomIconPath(destination)
                                     val destinationLabel = stringResource(destination.labelId)
+                                    val tint = if (isCoui) {
+                                        (if (LegadoTheme.isDark) Color.White else Color.Black)
+                                            .copy(alpha = if (selected) 230f / 255f else 184f / 255f)
+                                    } else Color.Unspecified
                                     FloatingBottomBarItem(
                                         enabled = !playbackControlsExpanded && expansion <= 0.05f,
+                                        selected = selected,
                                         onClick = {
                                             handleMainDestinationClick(index, destination)
                                         },
                                         modifier = Modifier
                                             .defaultMinSize(
-                                                minWidth = MainNavigationTabMinWidth
+                                                minWidth = if (isCoui) 48.dp else MainNavigationTabMinWidth
                                             )
                                             .semantics(mergeDescendants = true) {
                                                 contentDescription = destinationLabel
@@ -822,14 +897,21 @@ fun MainScreen(
                                             customIconPath = if (selected) {
                                                 selectedCustomIconPath.ifEmpty { customIconPath }
                                             } else customIconPath,
-                                            selected = selected
+                                            selected = selected,
+                                            tint = tint,
+                                            useCouiIcons = isCoui,
                                         )
                                         if (
                                             showLabel && (alwaysShowLabel || selected)
                                         ) {
                                             AppText(
-                                                text = stringResource(destination.labelId),
-                                                style = LegadoTheme.typography.labelSmall,
+                                                text = destinationLabel,
+                                                color = tint,
+                                                style = if (isCoui) LegadoTheme.typography.labelSmall.copy(
+                                                    fontSize = 10.sp,
+                                                    lineHeight = 12.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                ) else LegadoTheme.typography.labelSmall,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -910,15 +992,17 @@ private class MainPageLifecycleOwner : LifecycleOwner {
 
 @Composable
 private fun BookshelfRailGroupMenuRoute(
-    expanded: Boolean,
+    scope: CoroutineScope,
+    modifier: Modifier = Modifier,
     onDismissRequest: () -> Unit,
     onBeforeSelectGroup: suspend () -> Unit,
     viewModel: BookshelfViewModel = koinViewModel()
 ) {
     val groupState by viewModel.groupSelectorState.collectAsStateWithLifecycle()
     BookshelfRailGroupMenu(
-        expanded = expanded,
         state = groupState,
+        scope = scope,
+        modifier = modifier,
         onDismissRequest = onDismissRequest,
         onSelectGroup = { groupId ->
             onBeforeSelectGroup()
@@ -929,40 +1013,57 @@ private fun BookshelfRailGroupMenuRoute(
     )
 }
 
+private const val BookshelfRailGroupMenuIdPrefix = "group:"
+
+/**
+ * 书架图标长按弹出的分组菜单（窄底栏与宽导轨两处共用）。
+ *
+ * 受控模式：开合完全由调用方那次长按写入的 `showGroupMenu` 持有——两处入口都用
+ * `if (… && showGroupMenu)` 决定是否组合本组件，所以这里不再接收 `expanded`，
+ * 恒以 `embeddedExpanded = true` 渲染弹层；关闭经 `onDismissRequest` 回到调用方。
+ * 锚点取两处各自给定的 `Modifier.matchParentSize()` 容器（导航项）；当前分组用
+ * `AppAction.selected` 表达，替代原来的 `trailingIcon = Check`。
+ *
+ * 两处 `showGroupMenu` 是互斥布局分支（Miuix 底栏 / 宽导轨）内的局部状态，
+ * 与 `BookshelfScreen` 的 `BookshelfOverlay.GroupMenu` 无关，不合并到 ViewModel。
+ *
+ * 选中项的 `ChangeGroup` 必须跑在调用方 [scope] 上：各引擎受控弹层都先 `onDismissRequest`
+ * 再 `onAction`，页面随即把本组件移出组合，若用 `rememberCoroutineScope()` 自己的 scope，
+ * 那个协程会在 `onBeforeSelectGroup()` 挂起（`scrollToPage`）时被一起取消，分组就白点了。
+ */
 @Composable
 private fun BookshelfRailGroupMenu(
-    expanded: Boolean,
     state: io.legado.app.ui.main.bookshelf.BookshelfGroupSelectorState,
+    scope: CoroutineScope,
+    modifier: Modifier = Modifier,
     onDismissRequest: () -> Unit,
     onSelectGroup: suspend (Long) -> Unit,
 ) {
-    val coroutineScope = rememberCoroutineScope()
-
-    RoundDropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismissRequest
-    ) { dismiss ->
-        state.groups.forEachIndexed { groupIndex, group ->
-            RoundDropdownMenuItem(
-                text = group.groupName,
-                onClick = {
-                    coroutineScope.launch {
-                        onSelectGroup(group.groupId)
-                        dismiss()
-                    }
-                },
-                trailingIcon = {
-                    if (state.selectedGroupIndex == groupIndex) {
-                        AppIcon(
-                            Icons.Default.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            )
-        }
-    }
+    val groups = state.groups
+    AppActionMenu(
+        groups = persistentListOf(
+            AppActionGroup(
+                id = "bookshelf_rail_groups",
+                actions = groups.map { group ->
+                    AppAction(
+                        id = "$BookshelfRailGroupMenuIdPrefix${group.groupId}",
+                        label = group.groupName,
+                        selected = state.selectedGroupId == group.groupId,
+                    )
+                }.toImmutableList(),
+            ),
+        ),
+        onAction = { id ->
+            val groupId = id.removePrefix(BookshelfRailGroupMenuIdPrefix).toLongOrNull()
+            if (groupId != null) {
+                scope.launch { onSelectGroup(groupId) }
+            }
+        },
+        modifier = modifier,
+        embeddedExpanded = true,
+        onDismissRequest = onDismissRequest,
+        trigger = {},
+    )
 }
 
 @Composable
@@ -972,15 +1073,20 @@ private fun NavigationIcon(
     customIconPath: String,
     modifier: Modifier = Modifier,
     tint: Color = Color.Unspecified,
+    useCouiIcons: Boolean = false,
 ) {
     if (customIconPath.isNotEmpty()) {
         AsyncImage(
             model = customIconPath,
             contentDescription = null,
-            modifier = modifier.size(40.dp)
+            modifier = modifier.size(if (useCouiIcons) 24.dp else 40.dp)
         )
     } else {
-        val icon = AppIcons.mainDestination(destination, selected)
-        AppIcon(icon, contentDescription = null, modifier = modifier, tint = tint)
+        AppIcon(
+            AppIcons.mainDestination(destination, selected),
+            contentDescription = null,
+            modifier = if (useCouiIcons) modifier.size(24.dp) else modifier,
+            tint = tint,
+        )
     }
 }

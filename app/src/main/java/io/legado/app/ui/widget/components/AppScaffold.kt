@@ -15,14 +15,19 @@ import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.itos.coui.backdrop.couiBackdrop
+import com.itos.coui.backdrop.rememberCouiBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -32,11 +37,16 @@ import io.legado.app.domain.model.settings.hasBackgroundImage
 import io.legado.app.ui.theme.ComposeEngine
 import io.legado.app.ui.theme.LegadoTheme
 import io.legado.app.ui.theme.LocalAppUiConfiguration
+import io.legado.app.ui.theme.LocalHasMiuixPopupHost
 import io.legado.app.ui.theme.LocalHazeState
 import io.legado.app.ui.theme.LocalMiuixBarBackdrop
 import io.legado.app.ui.theme.LocalTopBarBackdrop
 import io.legado.app.ui.theme.LocalMochiBackdropRegistry
 import io.legado.app.ui.theme.LocalMochiScrollBlurProgress
+import io.legado.app.ui.theme.ThemeResolver
+import io.legado.app.ui.widget.components.coui.AppCouiTopBarHost
+import io.legado.app.ui.widget.components.coui.LocalAppCouiTopBarHost
+import io.legado.app.ui.widget.components.coui.LocalCouiPageBackdrop
 import ui.feice.mochi.effect.glass.LocalMochiBackdrop
 import ui.feice.mochi.effect.glass.rememberMochiBackdrop
 import ui.feice.mochi.effect.glass.mochiBackdropSource
@@ -87,10 +97,28 @@ fun AppScaffold(
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val liquidGlassEnabled = composeEngine == ComposeEngine.Material && topBar != null && themeSettings.topBarButtonStyle == "liquid"
     val backdropBaseColor = LegadoTheme.colorScheme.background
-    val miuixBackdrop = if (composeEngine == ComposeEngine.Miuix && nativeSamplingSupported &&
-        (hasBars && themeSettings.enableBlur || topBar != null && themeSettings.miuixTopBarLiquidGlass)) {
-        rememberMiuixLayerBackdrop {
+    val couiBackdrop = if (composeEngine == ComposeEngine.Coui && ThemeResolver.isCouiSupported() &&
+        nativeSamplingSupported && topBar != null && themeSettings.enableBlur
+    ) {
+        rememberCouiBackdrop {
             drawRect(backdropBaseColor)
+            drawContent()
+        }
+    } else null
+    val couiTopBarHost = if (composeEngine == ComposeEngine.Coui && topBar != null) {
+        val view = LocalView.current
+        remember(couiBackdrop, view) { AppCouiTopBarHost(couiBackdrop, view) }
+    } else null
+    val density = LocalDensity.current
+    val miuixEngine = composeEngine == ComposeEngine.Miuix
+    val miuixSurfaceColor = MiuixTheme.colorScheme.surface
+    val miuixBarBlur = miuixEngine && nativeSamplingSupported && hasBars && themeSettings.enableBlur
+    val miuixGlassMenus = miuixEngine && themeSettings.useHyperOs4Components &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    val miuixBackdrop = if (nativeSamplingSupported && (miuixBarBlur || miuixGlassMenus)) {
+        rememberMiuixLayerBackdrop {
+            // The scaffold surface sits outside this recording. Match its visible base color.
+            drawRect(miuixSurfaceColor)
             drawContent()
         }
     } else null
@@ -112,7 +140,8 @@ fun AppScaffold(
         }
     }
     val contentDrawsBehindBars =
-        alwaysDrawBehindBars || hazeState != null || miuixBackdrop != null || mochiBackdrop != null || mochiScrollBlur
+        alwaysDrawBehindBars || hazeState != null || miuixBarBlur || mochiBackdrop != null ||
+            mochiScrollBlur || couiBackdrop != null
 
     val containerColor = if (hasImageBg) {
         Color.Transparent
@@ -120,10 +149,10 @@ fun AppScaffold(
         LegadoTheme.colorScheme.background
     }
 
-    val miuixContainerColor = if (hasImageBg) {
+    val miuixContainerColor = if (hasImageBg && miuixBackdrop == null) {
         Color.Transparent
     } else {
-        MiuixTheme.colorScheme.surface
+        miuixSurfaceColor
     }
     val topBarBackgroundBackdrop = if (liquidGlassEnabled) rememberLayerBackdrop {
         drawRect(backdropBaseColor)
@@ -133,13 +162,25 @@ fun AppScaffold(
     val topBarBackdrop = if (topBarBackgroundBackdrop != null && topBarContentBackdrop != null) {
         rememberCombinedBackdrop(topBarBackgroundBackdrop, topBarContentBackdrop)
     } else topBarBackgroundBackdrop
+    val parentGlassOverlay = LocalAppGlassOverlay.current
+    val glassOverlay = if (miuixGlassMenus) parentGlassOverlay ?: remember { AppGlassOverlayState() } else null
+    if (miuixGlassMenus && parentGlassOverlay != null) {
+        val owner = remember { Any() }
+        // Publish the same recording used by the bars. A null source also masks older pages.
+        SideEffect { parentGlassOverlay.registerBackdrop(owner, miuixBackdrop) }
+        DisposableEffect(parentGlassOverlay, owner) {
+            onDispose { parentGlassOverlay.unregisterBackdrop(owner) }
+        }
+    }
 
     CompositionLocalProvider(
         LocalHazeState provides hazeState,
         LocalTopBarBackdrop provides topBarBackdrop,
         LocalMiuixBarBackdrop provides miuixBackdrop,
+        LocalHasMiuixPopupHost provides (composeEngine == ComposeEngine.Miuix),
         LocalMochiBackdrop provides mochiBackdrop,
         LocalMochiScrollBlurProgress provides mochiScrollProgress,
+        LocalAppGlassOverlay provides glassOverlay,
     ) {
         when (composeEngine) {
             ComposeEngine.Miuix -> {
@@ -167,7 +208,11 @@ fun AppScaffold(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .then(if (miuixBackdrop != null) Modifier.miuixLayerBackdrop(miuixBackdrop) else Modifier)
+                                .then(
+                                    if (miuixBackdrop != null) {
+                                        Modifier.miuixLayerBackdrop(miuixBackdrop)
+                                    } else Modifier
+                                )
                                 .then(
                                     if (contentDrawsBehindBars) Modifier
                                     else Modifier
@@ -175,19 +220,24 @@ fun AppScaffold(
                                         .consumeWindowInsets(scaffoldPadding)
                                 )
                         ) {
-                            if (miuixBackdrop != null) BackgroundImageContent(isDark = isDark, hazeState = null)
+                            if (miuixBackdrop != null) {
+                                BackgroundImageContent(isDark = isDark, hazeState = null)
+                            }
                             content(
                                 if (contentDrawsBehindBars) scaffoldPadding
                                 else PaddingValues(0.dp)
                             )
                         }
                     }
+                    if (glassOverlay != null && parentGlassOverlay == null) {
+                        AppGlassOverlayLayer(glassOverlay)
+                    }
                 }
             }
 
-            ComposeEngine.Material, ComposeEngine.Mochi -> {
+            ComposeEngine.Material, ComposeEngine.Mochi, ComposeEngine.Coui -> {
                 Box(modifier = modifier.fillMaxSize()) {
-                    if (mochiBackdrop == null && !mochiScrollBlur) {
+                    if (mochiBackdrop == null && !mochiScrollBlur && couiBackdrop == null) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -216,6 +266,8 @@ fun AppScaffold(
                                         materials.copy(bar = null, control = null, clear = null)
                                     }
                                     MochiMaterialsScope(barMaterials) { topBar() }
+                                } else if (composeEngine == ComposeEngine.Coui) {
+                                    CompositionLocalProvider(LocalAppCouiTopBarHost provides couiTopBarHost) { topBar() }
                                 } else {
                                     topBar()
                                 }
@@ -223,16 +275,23 @@ fun AppScaffold(
                         },
                         bottomBar = { bottomBar?.invoke() },
                         snackbarHost = snackbarHost,
-                        floatingActionButton = floatingActionButton,
+                        floatingActionButton = {
+                            // 只向独立栏位提供页面源，正文里的 FAB 不得采样自身。
+                            CompositionLocalProvider(LocalCouiPageBackdrop provides couiBackdrop) {
+                                floatingActionButton()
+                            }
+                        },
                         floatingActionButtonPosition = floatingActionButtonPosition,
                         containerColor = containerColor,
                         contentColor = contentColor,
                         contentWindowInsets = contentWindowInsets
                     ) { paddingValues ->
-                        val scaffoldPadding = paddingValues
+                        val scaffoldPadding = couiTopBarHost?.scrollBehavior?.state
+                            ?.contentPadding(paddingValues, density) ?: paddingValues
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .then(if (couiBackdrop != null) Modifier.couiBackdrop(couiBackdrop) else Modifier)
                                 .mochiBackdropSource(mochiBackdrop)
                                 .then(
                                     if (mochiScrollProgress != null && scaffoldPadding.calculateTopPadding() > 0.dp) {
@@ -257,7 +316,7 @@ fun AppScaffold(
                                         .consumeWindowInsets(scaffoldPadding)
                                 )
                         ) {
-                            if (mochiBackdrop != null || mochiScrollBlur) {
+                            if (mochiBackdrop != null || mochiScrollBlur || couiBackdrop != null) {
                                 BackgroundImageContent(isDark = isDark, hazeState = hazeState)
                             }
                             content(

@@ -1,5 +1,6 @@
 package io.legado.app.ui.widget.components.modalBottomSheet
 
+import android.os.Build
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -42,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -49,17 +51,23 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import com.itos.coui.menu.ProvideCouiMenuBackdrop
 import com.kyant.capsule.ContinuousRoundedRectangle
 import io.legado.app.ui.theme.ComposeEngine
 import io.legado.app.ui.theme.LegadoTheme
+import io.legado.app.ui.theme.LocalAppUiConfiguration
+import io.legado.app.ui.theme.LocalHasMiuixPopupHost
+import io.legado.app.ui.theme.LocalMiuixBarBackdrop
 import io.legado.app.ui.theme.LocalMochiBackdropRegistry
 import io.legado.app.ui.theme.LocalLegadoThemeColors
 import io.legado.app.ui.theme.ProvideAppContentColor
 import io.legado.app.ui.theme.ProvideAppDensity
+import io.legado.app.ui.theme.ThemeResolver
 import io.legado.app.ui.theme.rememberMochiOverlayBackdrop
-import io.legado.app.ui.widget.components.menuItem.LocalUseMiuixWindowPopup
+import io.legado.app.ui.widget.components.LocalAppGlassOverlay
 import io.legado.app.ui.widget.components.mochi.MochiOverlayAccessibility
 import io.legado.app.ui.widget.components.mochi.mochiOverlayContentModifier
+import top.yukonga.miuix.kmp.glass.GlassBottomSheet
 import top.yukonga.miuix.kmp.window.WindowBottomSheet
 import ui.feice.mochi.basic.MochiSheet
 import ui.feice.mochi.basic.MochiSheetContent
@@ -72,6 +80,30 @@ import ui.feice.mochi.shape.MochiContinuity
 import ui.feice.mochi.theme.MochiTheme
 
 private val MochiModalTopShape = ContinuousRoundedRectangle(32.dp, 32.dp, 0.dp, 0.dp, MochiContinuity)
+
+/**
+ * A window-level sheet has no popup host, but its content still inherits the parent Scaffold's
+ * locals. Override them so nested dropdowns do not register into a host they cannot be drawn in.
+ * A glass sheet lives in that same root host, so its dropdowns must keep the host signal.
+ */
+@Composable
+private fun MiuixSheetLocals(
+    useGlassContainer: Boolean,
+    sheetContentColor: Color,
+    content: @Composable () -> Unit,
+) {
+    ProvideAppDensity {
+        ProvideAppContentColor(sheetContentColor) {
+            CompositionLocalProvider(
+                LocalHasMiuixPopupHost provides useGlassContainer,
+                LocalAppGlassOverlay provides LocalAppGlassOverlay.current.takeIf { useGlassContainer },
+                LocalMiuixBarBackdrop provides LocalMiuixBarBackdrop.current.takeIf { useGlassContainer },
+            ) {
+                content()
+            }
+        }
+    }
+}
 
 enum class MochiSheetLayout {
     /** Floating half-height panel. The content owns its vertical scrolling. */
@@ -190,68 +222,85 @@ fun AppModalBottomSheet(
 
     when (composeEngine) {
         ComposeEngine.Miuix -> {
-            WindowBottomSheet(
-                show = show,
-                modifier = modifier,
-                title = title,
-                startAction = startAction?.let { action ->
-                    {
-                        ProvideAppDensity {
-                            ProvideAppContentColor(sheetContentColor) {
-                                CompositionLocalProvider(LocalUseMiuixWindowPopup provides true) {
-                                    Box(
-                                        modifier = if (contentPaddingEnabled) Modifier
-                                        else Modifier.padding(start = 16.dp),
-                                    ) { action() }
-                                }
-                            }
-                        }
-                    }
-                },
-                endAction = endAction?.let { action ->
-                    {
-                        ProvideAppDensity {
-                            ProvideAppContentColor(sheetContentColor) {
-                                CompositionLocalProvider(LocalUseMiuixWindowPopup provides true) {
-                                    Box(
-                                        modifier = if (contentPaddingEnabled) Modifier
-                                        else Modifier.padding(end = 16.dp),
-                                    ) { action() }
-                                }
-                            }
-                        }
-                    }
-                },
-                insideMargin = if (contentPaddingEnabled) DpSize(16.dp, 0.dp) else DpSize(0.dp, 0.dp),
-                backgroundColor = sheetContainerColor,
-                dragHandleColor = sheetDragHandleColor,
-                onDismissRequest = onDismissRequest,
-                enableWindowDim = true,
-            ) {
-                ProvideAppDensity {
-                    ProvideAppContentColor(sheetContentColor) {
-                        CompositionLocalProvider(LocalUseMiuixWindowPopup provides true) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .let {
-                                        if (contentPaddingEnabled) {
-                                            it.padding(bottom = 24.dp)
-                                        } else {
-                                            it.navigationBarsPadding()
-                                        }
-                                    }
-                                    .let { contentModifier ->
-                                        if (animateContentSize) contentModifier.animateContentSize() else contentModifier
-                                    },
-                                content = content
-                            )
-                        }
+            val themeSettings = LocalAppUiConfiguration.current.theme
+            val useGlassContainer = themeSettings.useHyperOs4Components &&
+                LocalHasMiuixPopupHost.current &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            val backdrop = LocalMiuixBarBackdrop.current
+            val insideMargin = if (contentPaddingEnabled) DpSize(16.dp, 0.dp) else DpSize(0.dp, 0.dp)
+            val wrappedStartAction: (@Composable () -> Unit)? = startAction?.let { action ->
+                {
+                    MiuixSheetLocals(useGlassContainer, sheetContentColor) {
+                        Box(
+                            modifier = if (contentPaddingEnabled) Modifier
+                            else Modifier.padding(start = 16.dp),
+                        ) { action() }
                     }
                 }
             }
+            val wrappedEndAction: (@Composable () -> Unit)? = endAction?.let { action ->
+                {
+                    MiuixSheetLocals(useGlassContainer, sheetContentColor) {
+                        Box(
+                            modifier = if (contentPaddingEnabled) Modifier
+                            else Modifier.padding(end = 16.dp),
+                        ) { action() }
+                    }
+                }
+            }
+            val sheetBody: @Composable () -> Unit = {
+                MiuixSheetLocals(useGlassContainer, sheetContentColor) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .let {
+                                if (contentPaddingEnabled) {
+                                    it.padding(bottom = 24.dp)
+                                } else {
+                                    it.navigationBarsPadding()
+                                }
+                            }
+                            .let { contentModifier ->
+                                if (animateContentSize) contentModifier.animateContentSize() else contentModifier
+                            },
+                        content = content
+                    )
+                }
+            }
+            if (useGlassContainer) {
+                // A glass sheet registers in the Scaffold's root popup host. Its content and
+                // nested dropdowns then share one coordinate root and one z-order.
+                GlassBottomSheet(
+                    onDismissRequest = onDismissRequest,
+                    show = show,
+                    backdrop = backdrop,
+                    modifier = modifier,
+                    title = title,
+                    startAction = wrappedStartAction,
+                    endAction = wrappedEndAction,
+                    insideMargin = insideMargin,
+                    containerColor = sheetContainerColor,
+                    dragHandleColor = sheetDragHandleColor,
+                    enableWindowDim = true,
+                    content = sheetBody,
+                )
+            } else {
+                WindowBottomSheet(
+                    show = show,
+                    modifier = modifier,
+                    title = title,
+                    startAction = wrappedStartAction,
+                    endAction = wrappedEndAction,
+                    insideMargin = insideMargin,
+                    backgroundColor = sheetContainerColor,
+                    dragHandleColor = sheetDragHandleColor,
+                    onDismissRequest = onDismissRequest,
+                    enableWindowDim = true,
+                    content = sheetBody,
+                )
+            }
         }
-        ComposeEngine.Material, ComposeEngine.Mochi -> {
+        ComposeEngine.Material, ComposeEngine.Mochi, ComposeEngine.Coui -> {
             if (show) {
                 val sheetState = rememberBottomSheetState(
                     initialValue = Hidden,
@@ -290,78 +339,91 @@ fun AppModalBottomSheet(
                         contentWindowInsets = contentWindowInsets,
                         sheetGesturesEnabled = sheetGesturesEnabled,
                     ) {
-                        ProvideAppDensity {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .let {
-                                        if (contentPaddingEnabled) {
-                                            it.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
-                                        } else {
-                                            it
-                                        }
-                                    }
-                                    .heightIn(max = maxHeight)
-                                    .let { contentModifier ->
-                                        if (animateContentSize) contentModifier.animateContentSize() else contentModifier
-                                    }
-                                    .then(modifier)
-                            ) {
-                                val hasHeader =
-                                    !title.isNullOrEmpty() || startAction != null || endAction != null
-
-                                if (hasHeader) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(bottom = 16.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (startAction != null) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.CenterStart)
-                                                    .let {
-                                                        if (contentPaddingEnabled) it else it.padding(
-                                                            start = 16.dp
-                                                        )
-                                                    }
-                                            ) {
-                                                startAction()
+                        val sheetBody: @Composable () -> Unit = {
+                            ProvideAppDensity {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .let {
+                                            if (contentPaddingEnabled) {
+                                                it.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                                            } else {
+                                                it
                                             }
                                         }
-
-                                        if (!title.isNullOrEmpty()) {
-                                            Text(
-                                                text = title,
-                                                style = if (isMochi) MochiTheme.textStyles.navTitle
-                                                    else LegadoTheme.typography.titleMediumEmphasized,
-                                                color = sheetContentColor,
-                                                textAlign = TextAlign.Center,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.padding(horizontal = 56.dp)
-                                            )
+                                        .heightIn(max = maxHeight)
+                                        .let { contentModifier ->
+                                            if (animateContentSize) contentModifier.animateContentSize() else contentModifier
                                         }
+                                        .then(modifier)
+                                ) {
+                                    val hasHeader =
+                                        !title.isNullOrEmpty() || startAction != null || endAction != null
 
-                                        if (endAction != null) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.CenterEnd)
-                                                    .let {
-                                                        if (contentPaddingEnabled) it else it.padding(
-                                                            end = 16.dp
-                                                        )
-                                                    }
-                                            ) {
-                                                endAction()
+                                    if (hasHeader) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(bottom = 16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (startAction != null) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.CenterStart)
+                                                        .let {
+                                                            if (contentPaddingEnabled) it else it.padding(
+                                                                start = 16.dp
+                                                            )
+                                                        }
+                                                ) {
+                                                    startAction()
+                                                }
+                                            }
+
+                                            if (!title.isNullOrEmpty()) {
+                                                Text(
+                                                    text = title,
+                                                    style = if (isMochi) MochiTheme.textStyles.navTitle
+                                                        else LegadoTheme.typography.titleMediumEmphasized,
+                                                    color = sheetContentColor,
+                                                    textAlign = TextAlign.Center,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.padding(horizontal = 56.dp)
+                                                )
+                                            }
+
+                                            if (endAction != null) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.CenterEnd)
+                                                        .let {
+                                                            if (contentPaddingEnabled) it else it.padding(
+                                                                end = 16.dp
+                                                            )
+                                                        }
+                                                ) {
+                                                    endAction()
+                                                }
                                             }
                                         }
                                     }
+
+                                    content()
                                 }
-
-                                content()
                             }
+                        }
+                        // COUI 菜单的玻璃材质采样所属窗口的内容根；Sheet 是独立窗口，
+                        // AppTheme 页面根的 ProvideCouiMenuBackdrop 覆盖不到这里。
+                        if (composeEngine == ComposeEngine.Coui && ThemeResolver.isCouiSupported()) {
+                            ProvideCouiMenuBackdrop { backdropModifier ->
+                                Box(backdropModifier, propagateMinConstraints = true) {
+                                    sheetBody()
+                                }
+                            }
+                        } else {
+                            sheetBody()
                         }
                     }
                 }
