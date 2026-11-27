@@ -1353,8 +1353,11 @@ fun ReaderCanvasSurface(
                                 // must not be reclaimed by a later diagonal direction change.
                                 bookmarkReleased = claim.isReleased
                             }
+                            // 滚动模式斜滑：只看 Y 分量是否过 touchSlop，不跟 X 比大小。
+                            // 要求 Y 主导会让 |dx| >= |dy| 的斜滑无人认领（SCROLL 无横向翻页），
+                            // 页面滑不动；认领后只用 moveDelta.y 滚，见下面的 scrollDrag 分支。
                             scrollDrag = transitionMode == ReaderTransitionMode.SCROLL &&
-                                    ReaderMainAxisPolicy.isVerticalDominant(total.x, total.y)
+                                    ReaderMainAxisPolicy.isVerticalScroll(total.y, pageTouchSlop)
                             horizontalTurn = !bookmarkDrag && !scrollDrag &&
                                     (if (transitionMode == ReaderTransitionMode.IOS_CURL)
                                         iosCurl.recognizedDirection != null
@@ -2232,17 +2235,42 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawScrollPageConte
     drawSelectionStylePreview(selectionPreviewStyle, previewBounds, beforeText = true)
     visibleDecorationCache.halfHighlights.forEach { it.draw(native) }
     val foregroundOverrides = bookForegroundOverrides(data.paints.keys, solidBackground)
+    // 搜索命中和样式预览要按元素改颜色，这两段时间退回逐字绘制。
+    val mergedTextRuns =
+        if (previewing || page.searchStart != null) {
+            emptyMap<ReaderElement.Text, ReaderTextDrawRun>()
+        } else {
+            data.textDrawRuns
+        }
     page.elements.forEach { e -> when (e) {
         is ReaderElement.Text -> {
-            val paint = data.paints.getValue(e.style)
-            paint.color = if (previewing && activeSelection.contains(e, page.id.chapterIndex)) {
-                selectionPreviewStyle.textColor ?: page.previewBaseTextColor(e)
-            } else page.resolvedColorArgb(e, readAloud.toArgb(), foregroundOverrides[e.style])
-            // 与分页绘制和旧 TextHtmlColumn 一致：规则自定义线替代 HTML 原生线，
-            // 链接下划线仍由原生 Paint 绘制。
-            paint.isUnderlineText = (e.style.nativeUnderline && e.style.underline == null) ||
-                    e.drawsLinkUnderline
-            native.drawText(e.value, e.bounds.left, e.baselinePx, paint)
+            val run = mergedTextRuns[e]
+            if (run == null) {
+                val paint = data.paints.getValue(e.style)
+                paint.color = if (previewing && activeSelection.contains(e, page.id.chapterIndex)) {
+                    selectionPreviewStyle.textColor ?: page.previewBaseTextColor(e)
+                } else page.resolvedColorArgb(e, readAloud.toArgb(), foregroundOverrides[e.style])
+                // 与分页绘制和旧 TextHtmlColumn 一致：规则自定义线替代 HTML 原生线，
+                // 链接下划线仍由原生 Paint 绘制。
+                paint.isUnderlineText = (e.style.nativeUnderline && e.style.underline == null) ||
+                        e.drawsLinkUnderline
+                native.drawText(e.value, e.bounds.left + e.glyphOffsetX, e.baselinePx, paint)
+                if (e.rubyText != null) {
+                    drawRubyText(native, e, paint, data.mergedRunPaint)
+                }
+            } else if (run.first === e) {
+                drawMergedTextRun(
+                    canvas = native,
+                    run = run,
+                    stylePaint = data.paints.getValue(run.style),
+                    colorArgb = page.resolvedColorArgb(
+                        run.first,
+                        readAloud.toArgb(),
+                        foregroundOverrides[run.style],
+                    ),
+                    scratchPaint = data.mergedRunPaint,
+                )
+            }
         }
 
         is ReaderElement.Image -> imageProvider(e)?.let { bitmap ->
@@ -2869,6 +2897,10 @@ private fun ReaderPageCanvas(
         textElements.map { it.style }.distinct()
             .associateWith(ReaderAndroidPaintFactory::create)
     }
+    // 建页时按真实字体核对整段 advance；命中、朗读状态变化不重复测量。
+    val textDrawRuns = remember(page.elements, paints) { buildMergedTextRuns(page.elements, paints) }
+    // 整段绘制时临时承载字距的画笔，避免改动 [paints] 里共用的画笔。
+    val mergedRunPaint = remember { Paint() }
     val solidBackground = solidPageBackground(background, backgroundImage, backgroundImageAlpha)
         .takeIf { drawBackground }
     val foregroundOverrides = remember(paints, solidBackground) {
@@ -2998,18 +3030,43 @@ private fun ReaderPageCanvas(
         }
         drawSelectionStylePreview(selectionPreviewStyle, previewBounds, beforeText = true)
         decorationDrawCache.halfHighlights.forEach { it.draw(native) }
+        // 搜索命中和样式预览要按元素改颜色，这两段时间退回逐字绘制。
+        val mergedTextRuns =
+            if (previewing || page.searchStart != null) {
+                emptyMap<ReaderElement.Text, ReaderTextDrawRun>()
+            } else {
+                textDrawRuns
+            }
         page.elements.forEach { e -> when (e) {
             is ReaderElement.Text -> {
-                val paint = paints.getValue(e.style)
-                paint.color = if (previewing && activeSelection.contains(e, page.id.chapterIndex)) {
-                    selectionPreviewStyle.textColor ?: page.previewBaseTextColor(e)
-                } else page.resolvedColorArgb(e, readAloud.toArgb(), foregroundOverrides[e.style])
-                // HTML 原生下划线（<u>）在与规则自定义下划线同时存在时只画自定义那条：
-                // 旧版从不画 HTML 原生下划线，两条线叠在一起会多出旧版没有的观感。
-                // 链接下划线仍按旧版优先（`TextHtmlColumn.draw` 的 isUnderlineText）。
-                paint.isUnderlineText = (e.style.nativeUnderline && e.style.underline == null) ||
-                        e.drawsLinkUnderline
-                native.drawText(e.value, e.bounds.left, e.baselinePx, paint)
+                val run = mergedTextRuns[e]
+                if (run == null) {
+                    val paint = paints.getValue(e.style)
+                    paint.color = if (previewing && activeSelection.contains(e, page.id.chapterIndex)) {
+                        selectionPreviewStyle.textColor ?: page.previewBaseTextColor(e)
+                    } else page.resolvedColorArgb(e, readAloud.toArgb(), foregroundOverrides[e.style])
+                    // HTML 原生下划线（<u>）在与规则自定义下划线同时存在时只画自定义那条：
+                    // 旧版从不画 HTML 原生下划线，两条线叠在一起会多出旧版没有的观感。
+                    // 链接下划线仍按旧版优先（`TextHtmlColumn.draw` 的 isUnderlineText）。
+                    paint.isUnderlineText = (e.style.nativeUnderline && e.style.underline == null) ||
+                            e.drawsLinkUnderline
+                    native.drawText(e.value, e.bounds.left + e.glyphOffsetX, e.baselinePx, paint)
+                    if (e.rubyText != null) {
+                        drawRubyText(native, e, paint, mergedRunPaint)
+                    }
+                } else if (run.first === e) {
+                    drawMergedTextRun(
+                        canvas = native,
+                        run = run,
+                        stylePaint = paints.getValue(run.style),
+                        colorArgb = page.resolvedColorArgb(
+                            run.first,
+                            readAloud.toArgb(),
+                            foregroundOverrides[run.style],
+                        ),
+                        scratchPaint = mergedRunPaint,
+                    )
+                }
             }
             is ReaderElement.Image -> images[e]?.let { bitmap ->
                 ReaderImageDrawLayout.forElement(e, bitmap.width, bitmap.height)?.let { layout ->

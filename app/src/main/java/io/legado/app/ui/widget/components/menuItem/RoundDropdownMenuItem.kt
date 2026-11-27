@@ -23,6 +23,8 @@ import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -67,15 +69,41 @@ fun RoundDropdownMenuItem(
     val hasCustomContentColor = color != Color.Unspecified
 
     when (LegadoTheme.composeEngine) {
+        ComposeEngine.Oxygen -> {
+            io.oxygenx.material3.ProvideMaterial3Content {
+                io.oxygenx.ui.overlay.DropdownMenuItem(
+                    text = {
+                        io.oxygenx.material3.ProvideMaterial3Content {
+                            io.legado.app.ui.widget.components.text.AppText(
+                                text,
+                                color = when {
+                                    !enabled -> Color.Unspecified
+                                    hasCustomContentColor -> color
+                                    isSelected -> LegadoTheme.colorScheme.primary
+                                    else -> Color.Unspecified
+                                },
+                            )
+                        }
+                    },
+                    onClick = onClick,
+                    modifier = modifier.semantics { selected = isSelected },
+                    leadingIcon = leadingIcon?.let { slot ->
+                        { io.oxygenx.material3.ProvideMaterial3Content { slot() } }
+                    },
+                    trailingIcon = trailingIcon?.let { slot ->
+                        { io.oxygenx.material3.ProvideMaterial3Content { slot() } }
+                    },
+                    enabled = enabled,
+                    contentPadding = contentPadding,
+                    interactionSource = interaction,
+                )
+            }
+        }
         ComposeEngine.Miuix -> {
             val legadoColorScheme = LegadoTheme.colorScheme
             val textColor = if (isSelected) legadoColorScheme.primary else legadoColorScheme.onSurface
-            // 玻璃面板里行不能自绘不透明底色，否则整块菜单会变成实心色。
-            val backgroundColor = if (LocalGlassPopupContent.current) {
-                Color.Transparent
-            } else {
-                legadoColorScheme.surfaceContainer
-            }
+            // Miuix 菜单只有玻璃面板一种形态，行不能自绘不透明底色。
+            val backgroundColor = Color.Transparent
             val checkColor = if (isSelected) legadoColorScheme.primary else Color.Transparent
 
             Row(

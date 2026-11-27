@@ -67,7 +67,7 @@ class ThemeConfigCouiThemeContractTest {
         val array = repoFileOf(THEMES_ARRAY_CN)
             .substringAfter("<string-array name=\"themes_item\">")
             .substringBefore("</string-array>")
-        assertTrue("themes_item 首项不再是动态取色", array.contains("<item>动态取色</item>"))
+        assertTrue("themes_item 首项应为动态取色", array.contains("<item>动态取色</item>"))
     }
 
     @Test
@@ -164,6 +164,115 @@ class ThemeConfigCouiThemeContractTest {
     }
 
     @Test
+    fun blurIsMandatoryForCouiAndHyperOs4() {
+        val themeConfig = sourceOf(THEME_CONFIG)
+        assertTrue(
+            "HyperOS 4 开关未按模糊能力门控",
+            themeConfig.contains("enabled = ThemeResolver.isBlurSupported(),"),
+        )
+        assertTrue(
+            "不支持模糊时开关仍显示为已开启",
+            themeConfig.contains("checked = theme.useHyperOs4Components && ThemeResolver.isBlurSupported(),"),
+        )
+        assertTrue(
+            "模糊开关未只在 Material / Mochi 下保留",
+            themeConfig.contains(
+                "if (composeEngine == ComposeEngine.Material || composeEngine == ComposeEngine.Mochi) {",
+            ),
+        )
+        assertFalse(
+            "COUI / Miuix 仍可通过模糊开关关闭材质",
+            themeConfig.contains("ComposeEngine.Coui -> ThemeResolver.isCouiSupported()"),
+        )
+
+        val resolver = sourceOf(THEME_RESOLVER)
+        assertTrue("未提供统一的模糊能力判定", resolver.contains("internal fun isBlurSupported()"))
+        assertTrue(
+            "COUI 未建立在模糊能力之上",
+            resolver.contains("isBlurSupported() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE"),
+        )
+
+        val scaffold = sourceOf(APP_SCAFFOLD)
+        assertFalse(
+            "COUI 顶栏仍被 enableBlur 门控",
+            scaffold.contains("nativeSamplingSupported && topBar != null && themeSettings.enableBlur"),
+        )
+        assertFalse(
+            "Miuix 顶栏模糊仍被 enableBlur 门控",
+            scaffold.contains("miuixEngine && nativeSamplingSupported && hasBars && themeSettings.enableBlur"),
+        )
+    }
+
+    /**
+     * 「首页与导航」「顶栏与底栏」从浮层收进外观页：设置项必须留在页面里（与同页 SettingItem
+     * 系列同形），浮层入口只保留仍需整块编辑的导航图标。
+     */
+    @Test
+    fun mainNavigationAndBarSettingsAreInlinedInTheAppearancePage() {
+        val page = sourceOf(THEME_CONFIG)
+        assertFalse("首页与导航仍在用浮层承载", page.contains("ThemeConfigSheet.MainNavigation"))
+        assertFalse("顶栏与底栏仍在用浮层承载", page.contains("ThemeConfigSheet.TopBottomBar"))
+        assertTrue("首页与导航未内联渲染", page.contains("MainNavigationSettingsSection("))
+        assertTrue("顶栏与底栏未内联渲染", page.contains("TopBottomBarSettingsSection("))
+        assertTrue("导航图标入口丢失", page.contains("ThemeConfigSheet.NavIcons"))
+        assertFalse(
+            "旧浮层实现仍留在源码树",
+            repoContains(SHEET_MAIN_NAVIGATION) || repoContains(SHEET_TOP_BOTTOM_BAR),
+        )
+
+        val navigation = sourceOf(MAIN_NAVIGATION_SECTION)
+        assertTrue("默认主页未使用同页下拉项", navigation.contains("SearchableSetting(\"theme.default_home_page\")"))
+        assertTrue("导航标签模式未使用同页下拉项", navigation.contains("DropdownListSettingItem("))
+        assertTrue("导航项未使用同页开关", navigation.contains("SwitchSettingItem("))
+        assertTrue("导航项丢失拖拽排序", navigation.contains("rememberReorderableLazyListState"))
+
+        val bars = sourceOf(TOP_BOTTOM_BAR_SECTION)
+        assertTrue("折叠应用栏未使用同页开关", bars.contains("SwitchSettingItem("))
+        assertTrue("模糊/不透明度未使用同页滑块", bars.contains("SliderSettingItem("))
+        assertTrue("引擎档位未使用同页下拉项", bars.contains("DropdownListSettingItem("))
+        assertTrue("COUI 锁定悬浮底栏的禁用语义丢失", bars.contains("enabled = !isCoui"))
+    }
+
+    /**
+     * COUI 的玻璃材质会把采样源图层画进自己的 patch：采样源一旦包含消费者自身，源图层就成为
+     * 自己的子节点，hwui 在 prepareTree 里无限递归，直到 RenderThread 栈溢出（native 闪退）。
+     * 因此多选栏只能用 AppScaffold 浮层槽位提供的正文源，不能自取窗口级菜单源（整页都在里面）。
+     */
+    @Test
+    fun couiFloatingToolbarOnlySamplesThePageOverlaySlot() {
+        val bar = sourceOf(SELECTION_BAR)
+        assertFalse(
+            "多选栏仍自取窗口级菜单采样源（该源录制整页，含本栏自身）",
+            bar.contains("rememberCouiWindowBackdrop"),
+        )
+        assertTrue(
+            "COUI 分支必须只消费浮层槽位提供的正文源",
+            bar.contains("val backdrop = LocalCouiPageBackdrop.current"),
+        )
+
+        val scaffold = sourceOf(APP_SCAFFOLD)
+        assertTrue(
+            "AppScaffold 缺少页面级浮层槽位",
+            scaffold.contains("overlay: @Composable BoxScope.() -> Unit = {}"),
+        )
+        assertTrue(
+            "浮层槽位未拿到正文采样源",
+            scaffold.contains("CompositionLocalProvider(LocalCouiPageBackdrop provides couiBackdrop) {") &&
+                scaffold.contains("Box(modifier = Modifier.fillMaxSize(), content = overlay)"),
+        )
+    }
+
+    @Test
+    fun hyperOs4TopBarIsAlwaysProgressive() {
+        val topBar = sourceOf(MIUIX_TOP_BAR)
+        assertFalse("OS4 顶栏仍受渐进模糊开关控制", topBar.contains("enableProgressiveBlur"))
+
+        val effects = sourceOf(MIUIX_BAR_EFFECTS)
+        assertTrue("OS4 顶栏未使用渐进模糊", effects.contains("ProgressiveBlur.Top.copy(curve = 2.2f)"))
+        assertFalse("OS4 顶栏仍保留整块模糊分支", effects.contains("val progressive ="))
+    }
+
+    @Test
     fun dropdownListSettingItemForwardsCommitAfterDismiss() {
         val source = sourceOf(LIST_SETTING_ITEM)
         assertTrue(
@@ -223,11 +332,26 @@ class ThemeConfigCouiThemeContractTest {
 
     private fun sourceOf(path: String): String = repoFileOf("app/src/main/java/$path")
 
-    private fun repoFileOf(path: String): String {
+    private fun repoFileOf(path: String): String = repoPath(path).readText()
+
+    /** 只判断路径是否存在：被删掉的文件不能沿用 [repoPath] 的「找不到就抛错」语义。 */
+    private fun repoContains(path: String): Boolean {
+        var directory: File? = File("").absoluteFile
+        while (directory != null) {
+            if (File(directory, path).exists()) return true
+            val isRepoRoot = File(directory, "settings.gradle.kts").isFile &&
+                File(directory, "app/src/main/java").isDirectory
+            if (isRepoRoot) return false
+            directory = directory.parentFile
+        }
+        return false
+    }
+
+    private fun repoPath(path: String): File {
         var directory: File? = File("").absoluteFile
         while (directory != null) {
             val candidate = File(directory, path)
-            if (candidate.isFile) return candidate.readText()
+            if (candidate.isFile) return candidate
             directory = directory.parentFile
         }
         error("从 ${File("").absolutePath} 向上找不到 $path")
@@ -235,10 +359,23 @@ class ThemeConfigCouiThemeContractTest {
 
     private companion object {
         const val THEME_CONFIG = "io/legado/app/ui/config/themeConfig/ThemeConfigScreen.kt"
+        const val MAIN_NAVIGATION_SECTION =
+            "io/legado/app/ui/config/themeConfig/MainNavigationSettingsSection.kt"
+        const val TOP_BOTTOM_BAR_SECTION =
+            "io/legado/app/ui/config/themeConfig/TopBottomBarSettingsSection.kt"
+        const val SHEET_MAIN_NAVIGATION =
+            "app/src/main/java/io/legado/app/ui/config/themeConfig/MainNavigationSettingsSheet.kt"
+        const val SHEET_TOP_BOTTOM_BAR =
+            "app/src/main/java/io/legado/app/ui/config/themeConfig/TopBottomBarSettingsSheet.kt"
         const val SETTING_ITEM = "io/legado/app/ui/widget/components/settingItem/SettingItem.kt"
         const val LIST_SETTING_ITEM = "io/legado/app/ui/widget/components/settingItem/ListSettingItem.kt"
         const val APP_THEME = "io/legado/app/ui/theme/AppTheme.kt"
         const val THEME_ENGINE = "io/legado/app/ui/theme/ThemeEngine.kt"
+        const val THEME_RESOLVER = "io/legado/app/ui/theme/ThemeResolver.kt"
+        const val APP_SCAFFOLD = "io/legado/app/ui/widget/components/AppScaffold.kt"
+        const val SELECTION_BAR = "io/legado/app/ui/widget/components/SelectionBottomBar.kt"
+        const val MIUIX_TOP_BAR = "io/legado/app/ui/widget/components/topbar/MiuixNativeTopBar.kt"
+        const val MIUIX_BAR_EFFECTS = "io/legado/app/ui/theme/MiuixBarEffects.kt"
         const val THEMES_ARRAY_CN = "app/src/main/res/values-zh-rCN/arrays.xml"
         const val STRINGS = "app/src/main/res/values/strings.xml"
         const val STRINGS_ZH_CN = "app/src/main/res/values-zh-rCN/strings.xml"

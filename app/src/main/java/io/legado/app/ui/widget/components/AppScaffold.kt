@@ -2,6 +2,7 @@ package io.legado.app.ui.widget.components
 
 import android.os.Build
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -50,7 +51,7 @@ import io.legado.app.ui.widget.components.coui.LocalCouiPageBackdrop
 import ui.feice.mochi.effect.glass.LocalMochiBackdrop
 import ui.feice.mochi.effect.glass.rememberMochiBackdrop
 import ui.feice.mochi.effect.glass.mochiBackdropSource
-import ui.feice.mochi.ios.IosGlass
+import ui.feice.mochi.theme.MochiGlassDefaults
 import ui.feice.mochi.effect.mask.mochiScrollEdgeBlur
 import ui.feice.mochi.theme.MochiMaterialsScope
 import ui.feice.mochi.theme.MochiTheme
@@ -69,7 +70,8 @@ fun AppScaffold(
     snackbarHost: @Composable () -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
     floatingActionButtonPosition: FabPosition = FabPosition.End,
-    contentColor: Color = contentColorFor(MiuixTheme.colorScheme.surface),
+    contentColor: Color = if (LegadoTheme.composeEngine == ComposeEngine.Oxygen) io.oxygenx.theme.OxygenTheme.colorScheme.onSurface
+        else contentColorFor(MiuixTheme.colorScheme.surface),
     contentWindowInsets: WindowInsets = ScaffoldDefaults.contentWindowInsets,
     alwaysDrawBehindBars: Boolean = false,
     /**
@@ -82,6 +84,14 @@ fun AppScaffold(
      * 因此 WebView 类页面必须把两个采样源一起关掉。
      */
     disableContentSampling: Boolean = false,
+    /**
+     * 页面级浮层（多选操作栏等），绘制在正文采样源**之外**。
+     *
+     * COUI 的玻璃材质会把采样源图层画进自己的 patch；浮层若位于采样源子树内，源图层就成了
+     * 自己的子节点，hwui 在 `prepareTree` 阶段无限递归，直到 RenderThread 栈溢出（native 闪退）。
+     * 浮层通过 [LocalCouiPageBackdrop] 取得正文采样源，因此必须画在这个槽位里。
+     */
+    overlay: @Composable BoxScope.() -> Unit = {},
     content: @Composable (PaddingValues) -> Unit
 ) {
     val isDark = LegadoTheme.isDark
@@ -97,8 +107,9 @@ fun AppScaffold(
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val liquidGlassEnabled = composeEngine == ComposeEngine.Material && topBar != null && themeSettings.topBarButtonStyle == "liquid"
     val backdropBaseColor = LegadoTheme.colorScheme.background
+    // COUI 的顶栏材质是外观的一部分，不再受 enableBlur 控制。
     val couiBackdrop = if (composeEngine == ComposeEngine.Coui && ThemeResolver.isCouiSupported() &&
-        nativeSamplingSupported && topBar != null && themeSettings.enableBlur
+        nativeSamplingSupported && topBar != null
     ) {
         rememberCouiBackdrop {
             drawRect(backdropBaseColor)
@@ -112,9 +123,10 @@ fun AppScaffold(
     val density = LocalDensity.current
     val miuixEngine = composeEngine == ComposeEngine.Miuix
     val miuixSurfaceColor = MiuixTheme.colorScheme.surface
-    val miuixBarBlur = miuixEngine && nativeSamplingSupported && hasBars && themeSettings.enableBlur
+    // Miuix 的顶/底栏模糊同样常开，enableBlur 只作用于 Material / Mochi。
+    val miuixBarBlur = miuixEngine && nativeSamplingSupported && hasBars
     val miuixGlassMenus = miuixEngine && themeSettings.useHyperOs4Components &&
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+        ThemeResolver.isBlurSupported()
     val miuixBackdrop = if (nativeSamplingSupported && (miuixBarBlur || miuixGlassMenus)) {
         rememberMiuixLayerBackdrop {
             // The scaffold surface sits outside this recording. Match its visible base color.
@@ -205,28 +217,32 @@ fun AppScaffold(
                     ) { paddingValues ->
                         // Insets belong to this scaffold's actual bars, not a global navigation preference.
                         val scaffoldPadding = paddingValues
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .then(
-                                    if (miuixBackdrop != null) {
-                                        Modifier.miuixLayerBackdrop(miuixBackdrop)
-                                    } else Modifier
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .then(
+                                        if (miuixBackdrop != null) {
+                                            Modifier.miuixLayerBackdrop(miuixBackdrop)
+                                        } else Modifier
+                                    )
+                                    .then(
+                                        if (contentDrawsBehindBars) Modifier
+                                        else Modifier
+                                            .padding(scaffoldPadding)
+                                            .consumeWindowInsets(scaffoldPadding)
+                                    )
+                            ) {
+                                if (miuixBackdrop != null) {
+                                    BackgroundImageContent(isDark = isDark, hazeState = null)
+                                }
+                                content(
+                                    if (contentDrawsBehindBars) scaffoldPadding
+                                    else PaddingValues(0.dp)
                                 )
-                                .then(
-                                    if (contentDrawsBehindBars) Modifier
-                                    else Modifier
-                                        .padding(scaffoldPadding)
-                                        .consumeWindowInsets(scaffoldPadding)
-                                )
-                        ) {
-                            if (miuixBackdrop != null) {
-                                BackgroundImageContent(isDark = isDark, hazeState = null)
                             }
-                            content(
-                                if (contentDrawsBehindBars) scaffoldPadding
-                                else PaddingValues(0.dp)
-                            )
+                            // 页面级浮层不在采样源子树内：浮层采样本页内容时不会形成自引用。
+                            Box(modifier = Modifier.fillMaxSize(), content = overlay)
                         }
                     }
                     if (glassOverlay != null && parentGlassOverlay == null) {
@@ -235,7 +251,7 @@ fun AppScaffold(
                 }
             }
 
-            ComposeEngine.Material, ComposeEngine.Mochi, ComposeEngine.Coui -> {
+            ComposeEngine.Oxygen, ComposeEngine.Material, ComposeEngine.Mochi, ComposeEngine.Coui -> {
                 Box(modifier = modifier.fillMaxSize()) {
                     if (mochiBackdrop == null && !mochiScrollBlur && couiBackdrop == null) {
                         Box(
@@ -261,9 +277,9 @@ fun AppScaffold(
                                         if (mochiScrollBlur) it else it.copy(scrollEdge = null)
                                     }
                                     val barMaterials = if (mochiTopBarGlassEnabled) {
-                                        materials.copy(control = remember(isDark) { IosGlass.regular(isDark) })
+                                        materials.copy(control = MochiGlassDefaults.Regular)
                                     } else {
-                                        materials.copy(bar = null, control = null, clear = null)
+                                        materials.copy(bar = null, control = null)
                                     }
                                     MochiMaterialsScope(barMaterials) { topBar() }
                                 } else if (composeEngine == ComposeEngine.Coui) {
@@ -288,41 +304,49 @@ fun AppScaffold(
                     ) { paddingValues ->
                         val scaffoldPadding = couiTopBarHost?.scrollBehavior?.state
                             ?.contentPadding(paddingValues, density) ?: paddingValues
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .then(if (couiBackdrop != null) Modifier.couiBackdrop(couiBackdrop) else Modifier)
-                                .mochiBackdropSource(mochiBackdrop)
-                                .then(
-                                    if (mochiScrollProgress != null && scaffoldPadding.calculateTopPadding() > 0.dp) {
-                                        Modifier.mochiScrollEdgeBlur(scaffoldPadding.calculateTopPadding()) { mochiScrollProgress.value() }
-                                    } else Modifier
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .then(if (couiBackdrop != null) Modifier.couiBackdrop(couiBackdrop) else Modifier)
+                                    .mochiBackdropSource(mochiBackdrop)
+                                    .then(
+                                        if (mochiScrollProgress != null && scaffoldPadding.calculateTopPadding() > 0.dp) {
+                                            Modifier.mochiScrollEdgeBlur(scaffoldPadding.calculateTopPadding()) { mochiScrollProgress.value() }
+                                        } else Modifier
+                                    )
+                                    .then(
+                                        if (topBarContentBackdrop != null) {
+                                            Modifier.layerBackdrop(topBarContentBackdrop)
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .then(
+                                        if (hazeState != null && !disableContentSampling) Modifier.hazeSource(hazeState)
+                                        else Modifier
+                                    )
+                                    .then(
+                                        if (contentDrawsBehindBars) Modifier
+                                        else Modifier
+                                            .padding(scaffoldPadding)
+                                            .consumeWindowInsets(scaffoldPadding)
+                                    )
+                            ) {
+                                if (mochiBackdrop != null || mochiScrollBlur || couiBackdrop != null) {
+                                    BackgroundImageContent(isDark = isDark, hazeState = hazeState)
+                                }
+                                content(
+                                    if (contentDrawsBehindBars) scaffoldPadding
+                                    else PaddingValues(0.dp)
                                 )
-                                .then(
-                                    if (topBarContentBackdrop != null) {
-                                        Modifier.layerBackdrop(topBarContentBackdrop)
-                                    } else {
-                                        Modifier
-                                    }
-                                )
-                                .then(
-                                    if (hazeState != null && !disableContentSampling) Modifier.hazeSource(hazeState)
-                                    else Modifier
-                                )
-                                .then(
-                                    if (contentDrawsBehindBars) Modifier
-                                    else Modifier
-                                        .padding(scaffoldPadding)
-                                        .consumeWindowInsets(scaffoldPadding)
-                                )
-                        ) {
-                            if (mochiBackdrop != null || mochiScrollBlur || couiBackdrop != null) {
-                                BackgroundImageContent(isDark = isDark, hazeState = hazeState)
                             }
-                            content(
-                                if (contentDrawsBehindBars) scaffoldPadding
-                                else PaddingValues(0.dp)
-                            )
+                            // 页面级浮层画在正文采样源之外。COUI 的玻璃材质会把正文图层画进自己的
+                            // patch；浮层若留在采样源子树里，该图层就成为自己的子节点，hwui 的
+                            // prepareTree 会无限递归直到 RenderThread 栈溢出（native 闪退）。
+                            CompositionLocalProvider(LocalCouiPageBackdrop provides couiBackdrop) {
+                                Box(modifier = Modifier.fillMaxSize(), content = overlay)
+                            }
                         }
                     }
                 }

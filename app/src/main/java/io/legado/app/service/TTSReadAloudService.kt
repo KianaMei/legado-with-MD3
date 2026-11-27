@@ -13,6 +13,7 @@ import io.legado.app.R
 import io.legado.app.constant.AppConst
 import io.legado.app.constant.AppLog
 import io.legado.app.constant.IntentAction
+import io.legado.app.data.entities.VoiceEffectPreset
 import io.legado.app.domain.gateway.ReadAloudSettingsGateway
 import io.legado.app.domain.model.readaloud.ReadAloudPlaybackCursor
 import io.legado.app.domain.model.readaloud.ReadAloudVoice
@@ -55,6 +56,9 @@ class TTSReadAloudService : BaseReadAloudService(), KoinComponent {
     private val pendingUtterances = mutableMapOf<String, CastMarkers.Spoken>()
 
     protected override val currentSpeechRate: Float
+        // 跟随系统时引擎按系统设置的 TTS 默认速率播，这里仍报 1f：
+        // 没有公开 API 能读引擎默认速率，媒体通知的进度/时长估算按 1× 折算是已知偏差，
+        // 偏差随系统语速线性放大（见 BaseReadAloudService 的 mediaProgressPositionMs / seekToMediaPosition）
         get() = if (ReadConfig.ttsFollowSys) 1f else (speechRateSetting + 5) / 10f
 
     private val readAloudSettingsGateway: ReadAloudSettingsGateway by inject()
@@ -231,6 +235,15 @@ class TTSReadAloudService : BaseReadAloudService(), KoinComponent {
                 initTts(requiredEngine)
                 return
             }
+            // 之前下发过角色语速、这一句起要跟随系统：引擎默认速率拿不回来，
+            // 只能重建引擎恢复，宁可在这个边界留一次可闻空档
+            if (needsEngineRateReset(nowSpeak, route)) {
+                AppLog.put("跟随系统语速，重建 TTS 引擎以清除残留的角色语速覆盖")
+                clearTTS()
+                playAfterTtsInit = true
+                initTts()
+                return
+            }
             // 换音色与改语速挪到 speakJob 里：那里先等引擎把上一句缓冲的音频放完，
             // 否则这两次调用打在还在播的那一句上，听着就是突然加速然后跳下一句
             nextRoute = route
@@ -313,8 +326,8 @@ class TTSReadAloudService : BaseReadAloudService(), KoinComponent {
         // 偏移用完才去掉标记：这一句要么干净正文，要么带着 <<角色（池）>> 交给认标签的引擎
         val utteranceId = ttsUtteranceId(AppConst.APP_TAG, session, nowSpeak)
         val spoken = speakable(storedTail, utteranceId, storedStart, readAloudNumber, limitLength = true)
-        if (spoken.text.isBlank()) {
-            AppLog.putDebug("TTS段落全标点跳过: nowSpeak=$nowSpeak")
+        if (spoken.text.isBlankReadAloudUnit()) {
+            AppLog.putDebug("TTS段落无可念字符跳过: nowSpeak=$nowSpeak")
             pendingUtterances.remove(utteranceId)
             val nextChunkOffset = speechProgress.remove(utteranceId)?.nextChunkOffset
             postTtsCallback {
@@ -377,7 +390,7 @@ class TTSReadAloudService : BaseReadAloudService(), KoinComponent {
                 val storedTail = paragraphs[i].substring(storedStart)
                 val utteranceId = ttsUtteranceId(AppConst.APP_TAG, session, i)
                 val text = speakable(storedTail, utteranceId, storedStart).text
-                if (text.isBlank()) {
+                if (text.isBlankReadAloudUnit()) {
                     pendingUtterances.remove(utteranceId)
                     speechProgress.remove(utteranceId)
                     return@synchronized
@@ -549,7 +562,8 @@ class TTSReadAloudService : BaseReadAloudService(), KoinComponent {
         return CueSpeechState(
             engineId = voice.engineId,
             voiceName = voice.speakerId,
-            rate = rate,
+            // null = 跟随系统（未显式覆盖引擎语速），与 appliedSpeechRate 的 -1f 哨兵对齐
+            rate = rate ?: -1f,
             pitch = pitch,
         )
     }
@@ -581,7 +595,9 @@ class TTSReadAloudService : BaseReadAloudService(), KoinComponent {
                 base = 0,
                 startReadAloudNumber = playbackQueue.cues[cue].chapterStart,
             )
-            if (spoken.text.isBlank() || spoken.text.length > TextToSpeech.getMaxSpeechInputLength()) {
+            if (spoken.text.isBlankReadAloudUnit() ||
+                spoken.text.length > TextToSpeech.getMaxSpeechInputLength()
+            ) {
                 pendingUtterances.remove(utteranceId)
                 speechProgress.remove(utteranceId)
                 // 空句和需要切片的长句留给串行路径，预取不能越过它们。
@@ -686,20 +702,26 @@ class TTSReadAloudService : BaseReadAloudService(), KoinComponent {
     }
 
     /** 这一句要的语速/音高：角色自带预设优先，其余落到全局语速与变声器。 */
-    private fun presetForCue(index: Int, voice: ReadAloudVoice): Pair<Float, Float> {
+    private fun presetForCue(index: Int, voice: ReadAloudVoice): Pair<Float?, Float> {
         val config = runCatching {
             GSON.fromJson(voice.traitsJson, SystemTtsVoiceConfig::class.java)
         }.getOrNull() ?: SystemTtsVoiceConfig()
-        val globalRate = if (ReadConfig.ttsFollowSys) {
-            1f
-        } else {
-            (speechRateSetting + 5) / 10f
-        }
         // 角色的变声器：直读路径没有自己的播放器，只能用引擎的音高/语速这一层
         val cue = playbackQueue.cues.getOrNull(index)
         val effect = VoiceEffectStore.ofSpeech(cue?.voiceEffect, cue?.characterId)
-        return VoiceEffectAudio.speedOf(effect, config.speechRate ?: globalRate) to
-            VoiceEffectAudio.pitchOf(effect, config.pitch ?: 1f)
+        return cueSpeechPreset(
+            followSys = ReadConfig.ttsFollowSys,
+            characterRate = config.speechRate,
+            characterPitch = config.pitch,
+            speechRateSetting = speechRateSetting,
+            effect = effect,
+        ).let { it.rate to it.pitch }
+    }
+
+    /** 这一句要「不下发语速」（跟随系统），但引擎上还挂着之前下发的语速 → 只能重建引擎恢复默认。 */
+    private fun needsEngineRateReset(index: Int, voice: ReadAloudVoice): Boolean {
+        val (rate, _) = presetForCue(index, voice)
+        return rate == null && appliedSpeechRate != -1f
     }
 
     private fun applyPreset(voice: ReadAloudVoice) {
@@ -715,8 +737,13 @@ class TTSReadAloudService : BaseReadAloudService(), KoinComponent {
         }
         val (rate, pitch) = presetForCue(nowSpeak, voice)
         val tts = textToSpeech ?: return
-        // 同一角色的连续两句算出的是同一个值，就别再发两次 binder 调用堆在切换边界上
-        if (rate != appliedSpeechRate) {
+        if (rate == null && effect?.speed?.let { it != 1f } == true) {
+            // 跟随系统 = 不下发引擎语速，变声器的速度倍率随之一起丢；混响那层挂不上有对称的日志
+            AppLog.put("跟随系统语速时变声器「${effect.name}」的速度档不生效，只有音高生效")
+        }
+        // 同一角色的连续两句算出的是同一个值，就别再发两次 binder 调用堆在切换边界上；
+        // rate 为 null 表示跟随系统，绝不能显式下发，否则会覆盖引擎的系统语速默认值
+        if (rate != null && rate != appliedSpeechRate) {
             appliedSpeechRate = rate
             tts.setSpeechRate(rate)
         }
@@ -728,10 +755,15 @@ class TTSReadAloudService : BaseReadAloudService(), KoinComponent {
 
     private fun applyDefaultPreset() {
         val tts = textToSpeech ?: return
-        val rate = if (ReadConfig.ttsFollowSys) 1f else (speechRateSetting + 5) / 10f
-        if (rate != appliedSpeechRate) {
-            appliedSpeechRate = rate
-            tts.setSpeechRate(rate)
+        // 跟随系统时不调用 setSpeechRate：引擎默认速率就是系统设置里的 TTS 语速，
+        // 显式下发 1f 会把系统滑杆的设置覆盖掉。若之前下发过自定义语速，
+        // 切换开关会经 upSpeechRate(reset=true) 重建引擎来恢复默认。
+        if (!ReadConfig.ttsFollowSys) {
+            val rate = (speechRateSetting + 5) / 10f
+            if (rate != appliedSpeechRate) {
+                appliedSpeechRate = rate
+                tts.setSpeechRate(rate)
+            }
         }
         if (appliedPitch != 1f) {
             appliedPitch = 1f
@@ -1109,5 +1141,32 @@ internal fun currentRangePosition(
  * TTS 回调只回传 utteranceId, 播放会话号必须编码进 id,
  * 否则旧会话(暂停/停止/换章后迟到)的回调无法与当前队列区分
  */
+/** 一句送进引擎前的语速/音高决策结果；[rate] 为 null 表示跟随系统，绝不能显式 setSpeechRate。 */
+internal data class CueSpeechPreset(
+    val rate: Float?,
+    val pitch: Float,
+)
+
+/**
+ * 这一句的语速/音高：角色显式配置优先，否则落到全局语速（跟随系统时为 null = 不下发）。
+ * 纯函数：入参覆盖 followSys × 角色有无 speechRate × 变声器预设，组合语义见 CueSpeechPresetTest。
+ */
+internal fun cueSpeechPreset(
+    followSys: Boolean,
+    characterRate: Float?,
+    characterPitch: Float?,
+    speechRateSetting: Int,
+    effect: VoiceEffectPreset?,
+): CueSpeechPreset {
+    // 跟随系统时全局语速为 null：引擎默认速率就是系统设置里的 TTS 语速，
+    // 显式 setSpeechRate（哪怕 1f）会把它覆盖掉
+    val globalRate = if (followSys) null else (speechRateSetting + 5) / 10f
+    val baseRate = characterRate ?: globalRate
+    return CueSpeechPreset(
+        rate = baseRate?.let { VoiceEffectAudio.speedOf(effect, it) },
+        pitch = VoiceEffectAudio.pitchOf(effect, characterPitch ?: 1f),
+    )
+}
+
 internal fun ttsUtteranceId(appTag: String, session: Int, index: Int): String =
     "$appTag$session:$index"

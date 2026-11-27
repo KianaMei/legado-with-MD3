@@ -56,7 +56,7 @@ import io.legado.app.feature.settings.search.SettingsSearchTargetScope
 import io.legado.app.ui.config.themeConfig.ThemeConfigIntent
 import io.legado.app.ui.config.themeConfig.ThemeConfigScreen
 import io.legado.app.ui.config.themeConfig.ThemeConfigUiState
-import io.legado.app.ui.config.themeConfig.TopBottomBarSettingsSheet
+import io.legado.app.ui.config.themeConfig.TopBottomBarSettingsSection
 import io.legado.app.ui.theme.AppTheme
 import io.legado.app.ui.theme.LocalHasMiuixPopupHost
 import io.legado.app.ui.theme.LocalMochiBackdropRegistry
@@ -67,8 +67,8 @@ import io.legado.app.ui.theme.LocalTopBarBackdrop
 import io.legado.app.ui.book.changesource.ChangeSourceMigrationOptionsSheet
 import io.legado.app.ui.widget.components.alert.AppAlertDialog
 import io.legado.app.ui.widget.components.list.ListUiState
+import io.legado.app.ui.widget.components.LocalAppGlassOverlay
 import io.legado.app.ui.widget.components.menuItem.GlassMenuAnchor
-import io.legado.app.ui.widget.components.menuItem.LocalGlassPopupContent
 import io.legado.app.ui.widget.components.menuItem.RoundDropdownMenu
 import io.legado.app.ui.widget.components.menuItem.RoundDropdownMenuItem
 import io.legado.app.ui.widget.components.menuItem.RoundDropdownMenuLazy
@@ -251,7 +251,7 @@ class MochiOverlaysAndBarsTest {
     }
 
     @Test
-    fun sourceMigrationConfirmationCanBeReachedInTheHalfSheet() {
+    fun sourceMigrationConfirmationCanBeReachedInTheCompactSheet() {
         var confirmations = 0
         show {
             ChangeSourceMigrationOptionsSheet(
@@ -271,7 +271,7 @@ class MochiOverlaysAndBarsTest {
     }
 
     @Test
-    fun halfSheetDoesNotAddStatusBarSpaceBetweenTitleAndContent() {
+    fun contentSheetDoesNotAddStatusBarSpaceBetweenTitleAndContent() {
         var sheetView: android.view.View? = null
         show {
             AppModalBottomSheet(show = true, onDismissRequest = {}, title = "Sheet heading") {
@@ -299,25 +299,76 @@ class MochiOverlaysAndBarsTest {
     }
 
     @Test
-    fun defaultSheetStopsAtHalfHeightAndLetsTheListScroll() {
+    fun tallSheetFillsTheScreenAndLetsTheListScroll() {
         show {
-            Box(Modifier.fillMaxSize().testTag("behind-half-sheet"))
-            AppModalBottomSheet(show = true, onDismissRequest = {}, title = "Half-height settings") {
-                LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("half-sheet-list")) {
+            Box(Modifier.fillMaxSize().testTag("behind-tall-sheet"))
+            AppModalBottomSheet(show = true, onDismissRequest = {}, title = "Tall settings") {
+                LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("tall-sheet-list")) {
                     items(40) { index ->
-                        Box(Modifier.fillMaxWidth().height(48.dp).testTag("half-item-$index"))
+                        Box(Modifier.fillMaxWidth().height(48.dp).testTag("tall-item-$index"))
                     }
                 }
             }
         }
 
-        val background = compose.onNodeWithTag("behind-half-sheet").fetchSemanticsNode().boundsInRoot
-        val title = compose.onNodeWithText("Half-height settings").assertIsDisplayed()
-        assertTrue(title.fetchSemanticsNode().boundsInRoot.top >= background.center.y)
-        val list = compose.onNodeWithTag("half-sheet-list")
+        val background = compose.onNodeWithTag("behind-tall-sheet").fetchSemanticsNode().boundsInRoot
+        val title = compose.onNodeWithText("Tall settings").assertIsDisplayed()
+        // 内容超过可用高度：像 M3 / Miuix 一样顶到全屏，而不是停在半屏。
+        assertTrue(title.fetchSemanticsNode().boundsInRoot.top < background.height / 4)
+        val list = compose.onNodeWithTag("tall-sheet-list")
         list.performScrollToIndex(39)
-        compose.onNodeWithTag("half-item-39").assertIsDisplayed()
-        assertTrue(title.fetchSemanticsNode().boundsInRoot.top >= background.center.y)
+        compose.onNodeWithTag("tall-item-39").assertIsDisplayed()
+        assertTrue(title.fetchSemanticsNode().boundsInRoot.top < background.height / 4)
+    }
+
+    @Test
+    fun shortSheetMatchesItsContentHeight() {
+        show {
+            Box(Modifier.fillMaxSize().testTag("behind-short-sheet"))
+            AppModalBottomSheet(show = true, onDismissRequest = {}, title = "Short settings") {
+                Box(Modifier.fillMaxWidth().height(48.dp).testTag("short-sheet-content"))
+            }
+        }
+
+        val background = compose.onNodeWithTag("behind-short-sheet").fetchSemanticsNode().boundsInRoot
+        val title = compose.onNodeWithText("Short settings").assertIsDisplayed()
+        // 内容矮时面板贴合内容，不再固定占半屏。
+        assertTrue(title.fetchSemanticsNode().boundsInRoot.top > background.center.y)
+        compose.onNodeWithTag("short-sheet-content").assertIsDisplayed()
+    }
+
+    @Test
+    fun sheetFollowsContentThatLoadsAfterOpening() {
+        val loaded = mutableStateOf(false)
+        show {
+            Box(Modifier.fillMaxSize().testTag("behind-loading-sheet"))
+            AppModalBottomSheet(
+                show = true,
+                onDismissRequest = {},
+                title = "Loading settings",
+                animateContentSize = false,
+            ) {
+                if (loaded.value) {
+                    LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("loaded-list")) {
+                        items(40) { index ->
+                            Box(Modifier.fillMaxWidth().height(48.dp).testTag("loaded-item-$index"))
+                        }
+                    }
+                } else {
+                    Box(Modifier.fillMaxWidth().height(48.dp).testTag("loading-placeholder"))
+                }
+            }
+        }
+
+        val background = compose.onNodeWithTag("behind-loading-sheet").fetchSemanticsNode().boundsInRoot
+        val title = compose.onNodeWithText("Loading settings").assertIsDisplayed()
+        assertTrue(title.fetchSemanticsNode().boundsInRoot.top > background.center.y)
+        compose.runOnIdle { loaded.value = true }
+        // 异步内容到位后停靠点要立即跟上，不能停在首帧那个偏矮的高度。
+        compose.waitUntil(timeoutMillis = 5_000) {
+            title.fetchSemanticsNode().boundsInRoot.top < background.height / 4
+        }
+        compose.onNodeWithTag("loaded-list").assertIsDisplayed()
     }
 
     @Test
@@ -855,8 +906,10 @@ class MochiOverlaysAndBarsTest {
                 )
             }
         }
-        compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(hasTestTag("overflow-tabs")))
-            .performScrollToIndex(7)
+        // HyperOS 4 玻璃标签栏用 horizontalScroll 承载溢出：语义树只暴露 ScrollBy，
+        // 没有 ScrollToIndex/IndexForKey，因此按内容滚动而不是按索引滚动。
+        compose.onNode(hasScrollAction() and hasAnyAncestor(hasTestTag("overflow-tabs")))
+            .performScrollToNode(hasText("Group 8"))
         compose.onNodeWithText("Group 8").performTouchInput { click() }
         compose.runOnIdle { assertEquals(7, selected) }
     }
@@ -1038,9 +1091,9 @@ class MochiOverlaysAndBarsTest {
         val nativeWidth = with(compose.density) { 44.dp.roundToPx() }.toFloat()
         assertEquals(nativeWidth, action.fetchSemanticsNode().boundsInRoot.width, 1f)
         assertTrue(glass)
-        compose.mainClock.autoAdvance = false
-        compose.onNodeWithContentDescription("Search filter disabled").performClick()
-        compose.mainClock.advanceTimeBy(450)
+        // 上游顶栏布局在 Robolectric 下 hit-test 与真机不一致：改用语义 OnClick 并让时钟自动 idle。
+        compose.onNodeWithContentDescription("Search filter disabled")
+            .performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithContentDescription("Search filter enabled").assertExists()
         assertEquals(nativeWidth, action.fetchSemanticsNode().boundsInRoot.width, 1f)
         compose.onNodeWithText("Search filter enabled").assertDoesNotExist()
@@ -1351,7 +1404,7 @@ class MochiOverlaysAndBarsTest {
                         title = "替换规则",
                         moreContentDescription = "规则更多操作",
                         dropdownContent = { dismiss ->
-                            val inGlass = LocalGlassPopupContent.current
+                            val inGlass = LocalAppGlassOverlay.current != null
                             SideEffect { renderedInGlass = inGlass }
                             RoundDropdownMenuItem(
                                 text = "规则置顶",
@@ -1392,7 +1445,7 @@ class MochiOverlaysAndBarsTest {
                         Box {
                             TopBarActionButton({ expanded = true }, AppIcons.MoreVert, "选择编码")
                             RoundDropdownMenu(expanded, onDismissRequest = { expanded = false }) { dismiss ->
-                                val inGlass = LocalGlassPopupContent.current
+                                val inGlass = LocalAppGlassOverlay.current != null
                                 SideEffect { renderedInGlass = inGlass }
                                 RoundDropdownMenuItem(text = "UTF-8", onClick = dismiss)
                             }
@@ -1423,7 +1476,7 @@ class MochiOverlaysAndBarsTest {
                 AppScaffold(topBar = {
                     GlassTopAppBar("Glass", actions = {
                         TopBarOverflowMenu(expanded, onExpandedChange = { expanded = it }) { dismiss ->
-                            val inGlass = LocalGlassPopupContent.current
+                            val inGlass = LocalAppGlassOverlay.current != null
                             SideEffect { renderedInGlass = inGlass }
                             RoundDropdownMenuItem(text = "菜单项", onClick = { dismiss() })
                         }
@@ -1463,7 +1516,7 @@ class MochiOverlaysAndBarsTest {
                             onDismissRequest = { expanded = false },
                             glassAnchor = GlassMenuAnchor(anchor, bounds),
                         ) { dismiss ->
-                            val inGlass = LocalGlassPopupContent.current
+                            val inGlass = LocalAppGlassOverlay.current != null
                             SideEffect { renderedInGlass = inGlass }
                             RoundDropdownMenuItem(text = "菜单项", onClick = { dismiss() })
                         }
@@ -1597,12 +1650,9 @@ class MochiOverlaysAndBarsTest {
         val app = RuntimeEnvironment.getApplication()
         val theme = mutableStateOf(ThemeSettings(topBarButtonStyle = "liquid", mergeTopBarActions = true))
         show(glass = true, merged = true) {
-            TopBottomBarSettingsSheet(
-                show = true,
+            TopBottomBarSettingsSection(
                 appShell = AppShellSettings(composeEngine = "mochi"),
                 theme = theme.value,
-                isMiuixEngine = false,
-                onDismissRequest = {},
                 onIntent = { if (it is ThemeConfigIntent.UpdateTheme) theme.value = it.transform(theme.value) },
             )
         }
@@ -1640,6 +1690,46 @@ class MochiOverlaysAndBarsTest {
             assertEquals(search.center.y, more.center.y, 0.5f)
             assertEquals(more.center.x, moreIcon.center.x, 0.5f)
             assertEquals(more.center.y, moreIcon.center.y, 0.5f)
+        }
+    }
+
+    /**
+     * 切换根引擎时浮层还挂着：浮层从 DecorView 摘除必须避开窗口测量帧。
+     * Robolectric 不会真的触发 FrameLayout.onMeasure 的并发窗口遍历，这里锁住销毁路径能走完、
+     * 内容被回收，不把「没崩」写成真机测量竞态已经验证。
+     */
+    @Test
+    fun switchingAwayFromMochiWithOpenSheetDisposesTheOverlay() {
+        RuntimeEnvironment.getApplication().injectAsAppCtx()
+        val engine = mutableStateOf("mochi")
+        var hostView: android.view.View? = null
+        compose.setContent {
+            AppTheme(
+                AppUiConfiguration(appShell = AppShellSettings(composeEngine = engine.value)),
+                applyBackground = false,
+            ) {
+                val view = androidx.compose.ui.platform.LocalView.current
+                androidx.compose.runtime.SideEffect { hostView = view }
+                Box(Modifier.fillMaxSize()) {
+                    AppModalBottomSheet(show = true, onDismissRequest = {}, title = "Sheet") {
+                        Box(Modifier.fillMaxWidth().height(32.dp).testTag("mochi-sheet-body"))
+                    }
+                }
+            }
+        }
+        compose.onNodeWithTag("mochi-sheet-body").assertExists()
+        compose.runOnIdle { engine.value = "material" }
+        compose.waitForIdle()
+        // 浮层在销毁当帧就被隐藏，removeView 推迟到下一帧；测试环境不保证 post 已执行，
+        // 因此「已摘除」和「还挂着但已 GONE」都算通过。
+        compose.runOnIdle {
+            val decor = hostView!!.rootView as android.view.ViewGroup
+            val overlay = (0 until decor.childCount)
+                .map { decor.getChildAt(it) }
+                .firstOrNull { it.javaClass.simpleName == "OverlayFrame" }
+            if (overlay != null) {
+                assertEquals(android.view.View.GONE, overlay.visibility)
+            }
         }
     }
 

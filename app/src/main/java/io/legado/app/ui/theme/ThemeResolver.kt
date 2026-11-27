@@ -100,6 +100,7 @@ object ThemeResolver {
 
     fun resolveComposeEngine(value: String): ComposeEngine {
         return when {
+            value.equals("oxygen", ignoreCase = true) -> ComposeEngine.Oxygen
             value.equals(COMPOSE_ENGINE_MIUIX, ignoreCase = true) -> ComposeEngine.Miuix
             value.equals("mochi", ignoreCase = true) -> ComposeEngine.Mochi
             value.equals(COMPOSE_ENGINE_COUI, ignoreCase = true) && isCouiSupported() -> ComposeEngine.Coui
@@ -110,8 +111,13 @@ object ThemeResolver {
     internal fun useFloatingBottomBar(engine: ComposeEngine, preference: Boolean): Boolean =
         engine == ComposeEngine.Coui || preference
 
+    /** 玻璃材质依赖 RuntimeShader 与背景采样；API 33 以下没有可用实现。 */
+    @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.TIRAMISU)
+    internal fun isBlurSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
     @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-    internal fun isCouiSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+    internal fun isCouiSupported(): Boolean =
+        isBlurSupported() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
 
     fun resolveColorSpecVersion(colorSpec: ThemeColorSpec): ColorSpec.SpecVersion {
         return when (colorSpec) {

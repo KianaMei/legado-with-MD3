@@ -7,11 +7,11 @@ import android.content.Context
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,12 +35,9 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.ButtonGroupDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
@@ -79,10 +76,11 @@ import io.legado.app.ui.widget.components.FontFolderState
 import io.legado.app.ui.widget.components.FontSelectSheet
 import io.legado.app.ui.widget.components.SplicedColumnGroup
 import io.legado.app.ui.widget.components.alert.AppAlertDialog
-import io.legado.app.ui.widget.components.button.series.MediumTonalButton
 import io.legado.app.ui.widget.components.card.InfoCard
 import io.legado.app.ui.widget.components.dialog.ColorPickerSheet
 import io.legado.app.ui.widget.components.dialog.TimePickerDialog
+import io.legado.app.ui.widget.components.icon.AppIcon
+import io.legado.app.ui.widget.components.modalBottomSheet.SheetAction
 import io.legado.app.ui.widget.components.settingItem.ClickableSettingItem
 import io.legado.app.ui.widget.components.settingItem.DropdownListSettingItem
 import io.legado.app.ui.widget.components.settingItem.SliderSettingItem
@@ -139,9 +137,9 @@ fun ThemeConfigScreen(
                 val isCouiEngine = remember(composeEngine) {
                     composeEngine == ComposeEngine.Coui
                 }
-                // Miuix / COUI 未启用自定义主题色时配色由引擎内置方案决定，
+                // Miuix / COUI / Oxygen 未启用自定义主题色时配色由引擎内置方案决定，
                 // 不显示项目自绘色板预览卡，也不提供主题配色列表。
-                val useBuiltInPaletteEngine = isMiuixEngine || isCouiEngine
+                val useBuiltInPaletteEngine = isMiuixEngine || isCouiEngine || composeEngine == ComposeEngine.Oxygen
                 val isDarkTheme = LegadoTheme.isDark
 
                 if (!useBuiltInPaletteEngine) {
@@ -198,7 +196,7 @@ fun ThemeConfigScreen(
                             )
                         }
 
-                        // Miuix / COUI 都提供「自定义主题色」：关闭时配色由引擎内置方案决定。
+                        // Miuix / COUI / Oxygen 都提供「自定义主题色」：关闭时配色由引擎内置方案决定。
                         if (useBuiltInPaletteEngine) {
                             SearchableSetting("theme.miuix_monet") {
                                 SwitchSettingItem(
@@ -299,8 +297,9 @@ fun ThemeConfigScreen(
                             appShell.composeEngine
                         }
                         val entries = stringArrayResource(R.array.composeEngine) +
-                            (if (couiSupported) "COUI" else stringResource(R.string.coui_theme_requires_android_14))
-                        val values = stringArrayResource(R.array.composeEngine_value) + coui
+                            (if (couiSupported) "COUI" else stringResource(R.string.coui_theme_requires_android_14)) +
+                            stringResource(R.string.oxygen_ui_engine)
+                        val values = stringArrayResource(R.array.composeEngine_value) + arrayOf(coui, "oxygen")
                         DropdownListSettingItem(
                             title = stringResource(R.string.compose_engine),
                             selectedValue = selectedValue,
@@ -318,8 +317,9 @@ fun ThemeConfigScreen(
                             SwitchSettingItem(
                                 title = stringResource(R.string.hyper_os4_components),
                                 description = stringResource(R.string.hyper_os4_components_summary),
-                                checked = theme.useHyperOs4Components,
-                                enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
+                                // 没有模糊就没有这套外观：不支持时既不能打开，也不显示为已开启。
+                                checked = theme.useHyperOs4Components && ThemeResolver.isBlurSupported(),
+                                enabled = ThemeResolver.isBlurSupported(),
                                 onCheckedChange = { enabled ->
                                     updateTheme {
                                         it.copy(
@@ -427,15 +427,20 @@ fun ThemeConfigScreen(
                 }
 
                 SplicedColumnGroup(title = stringResource(R.string.main_activity)) {
-                    SearchableSetting("theme.main_navigation_settings") {
-                        ClickableSettingItem(
-                            title = stringResource(R.string.main_navigation_settings),
-                            description = stringResource(R.string.main_navigation_settings_summary),
-                            onClick = {
-                                onIntent(ThemeConfigIntent.ShowSheet(ThemeConfigSheet.MainNavigation))
-                            },
-                        )
-                    }
+                    MainNavigationSettingsSection(
+                        settings = appShell,
+                        onSetDefault = { onIntent(ThemeConfigIntent.SetDefaultHomePage(it)) },
+                        onSetLabelVisibilityMode = {
+                            onIntent(ThemeConfigIntent.SetLabelVisibilityMode(it))
+                        },
+                        onOpenNavIcons = {
+                            onIntent(ThemeConfigIntent.ShowSheet(ThemeConfigSheet.NavIcons))
+                        },
+                        onSetVisible = { route, visible ->
+                            onIntent(ThemeConfigIntent.SetMainDestinationVisible(route, visible))
+                        },
+                        onSetOrder = { onIntent(ThemeConfigIntent.SetMainNavigationOrder(it)) },
+                    )
                     SearchableSetting("theme.show_status") {
                         SwitchSettingItem(
                             title = stringResource(R.string.show_status),
@@ -457,15 +462,6 @@ fun ThemeConfigScreen(
                                     ThemeConfigIntent.SetSwipeAnimation(it)
                                 )
                             }
-                        )
-                    }
-                    SearchableSetting("theme.top_bottom_bar_settings") {
-                        ClickableSettingItem(
-                            title = stringResource(R.string.top_bottom_bar_settings),
-                            description = stringResource(R.string.top_bottom_bar_settings_summary),
-                            onClick = {
-                                onIntent(ThemeConfigIntent.ShowSheet(ThemeConfigSheet.TopBottomBar))
-                            },
                         )
                     }
                     SearchableSetting("theme.tabletInterface") {
@@ -490,6 +486,14 @@ fun ThemeConfigScreen(
                             onValueChange = { onIntent(ThemeConfigIntent.SetMultiPaneMode(it)) },
                         )
                     }
+                }
+
+                SplicedColumnGroup(title = stringResource(R.string.top_bottom_bar_settings)) {
+                    TopBottomBarSettingsSection(
+                        appShell = appShell,
+                        theme = theme,
+                        onIntent = onIntent,
+                    )
                 }
 
                 SplicedColumnGroup(title = stringResource(R.string.book_info_page)) {
@@ -629,37 +633,37 @@ fun ThemeConfigScreen(
                     }
                 }
 
-                SplicedColumnGroup(title = stringResource(R.string.blur_effects)) {
-                    val isMochi = composeEngine == ComposeEngine.Mochi
-                    val blurSupported = when (composeEngine) {
-                        ComposeEngine.Material -> true
-                        ComposeEngine.Miuix, ComposeEngine.Mochi ->
+                // COUI / Miuix 的模糊是外观本身，不能关闭；只有 Material / Mochi 保留开关。
+                if (composeEngine == ComposeEngine.Material || composeEngine == ComposeEngine.Mochi) {
+                    SplicedColumnGroup(title = stringResource(R.string.blur_effects)) {
+                        val isMochi = composeEngine == ComposeEngine.Mochi
+                        val blurSupported = if (isMochi) {
                             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                        ComposeEngine.Coui -> ThemeResolver.isCouiSupported()
-                    }
-                    val blurEnabled = if (isMochi) theme.mochiScrollEdgeBlurEnabled else theme.enableBlur
-                    SearchableSetting("theme.is_blur_enable") {
-                        SwitchSettingItem(
-                            title = stringResource(R.string.is_blur_enable),
-                            checked = blurSupported && blurEnabled,
-                            enabled = blurSupported,
-                            onCheckedChange = { enabled ->
-                                if (isMochi) updateTheme { it.copy(mochiScrollEdgeBlurEnabled = enabled) }
-                                else onIntent(ThemeConfigIntent.SetBlurEnabled(enabled))
-                            }
-                        )
-                    }
-                    AnimatedVisibility(visible = !isMochi && composeEngine != ComposeEngine.Coui &&
-                        blurSupported && theme.enableBlur
-                    ) {
-                        SearchableSetting("theme.is_blur_progressive_enable") {
+                        } else {
+                            true
+                        }
+                        val blurEnabled = if (isMochi) theme.mochiScrollEdgeBlurEnabled else theme.enableBlur
+                        SearchableSetting("theme.is_blur_enable") {
                             SwitchSettingItem(
-                                title = stringResource(R.string.is_blur_progressive_enable),
-                                checked = theme.enableProgressiveBlur,
-                                onCheckedChange = { value ->
-                                    updateTheme { it.copy(enableProgressiveBlur = value) }
+                                title = stringResource(R.string.is_blur_enable),
+                                checked = blurSupported && blurEnabled,
+                                enabled = blurSupported,
+                                onCheckedChange = { enabled ->
+                                    if (isMochi) updateTheme { it.copy(mochiScrollEdgeBlurEnabled = enabled) }
+                                    else onIntent(ThemeConfigIntent.SetBlurEnabled(enabled))
                                 }
                             )
+                        }
+                        AnimatedVisibility(visible = !isMochi && blurSupported && theme.enableBlur) {
+                            SearchableSetting("theme.is_blur_progressive_enable") {
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.is_blur_progressive_enable),
+                                    checked = theme.enableProgressiveBlur,
+                                    onCheckedChange = { value ->
+                                        updateTheme { it.copy(enableProgressiveBlur = value) }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -891,7 +895,7 @@ fun ThemeConfigScreen(
                                                 .background(Color(theme.itemDividerColor))
                                                 .border(
                                                     1.dp,
-                                                    MaterialTheme.colorScheme.outlineVariant,
+                                                    LegadoTheme.colorScheme.outlineVariant,
                                                     CircleShape
                                                 )
                                         )
@@ -1054,29 +1058,12 @@ fun ThemeConfigScreen(
         onRemoveDark = { removeImage(true) },
     )
 
-    MainNavigationSettingsSheet(
-        show = state.activeSheet == ThemeConfigSheet.MainNavigation,
+    NavIconManageSheet(
+        show = state.activeSheet == ThemeConfigSheet.NavIcons,
         settings = appShell,
         onDismissRequest = { onIntent(ThemeConfigIntent.DismissSheet) },
-        onSetVisible = { route, visible ->
-            onIntent(ThemeConfigIntent.SetMainDestinationVisible(route, visible))
-        },
-        onSetOrder = { onIntent(ThemeConfigIntent.SetMainNavigationOrder(it)) },
-        onSetDefault = { onIntent(ThemeConfigIntent.SetDefaultHomePage(it)) },
-        onRequestNavigationIcon = { onIntent(ThemeConfigIntent.RequestNavigationIcon(it)) },
-        onClearNavigationIcon = { onIntent(ThemeConfigIntent.SelectNavigationIcon(it, "")) },
-        onSetLabelVisibilityMode = {
-            onIntent(ThemeConfigIntent.SetLabelVisibilityMode(it))
-        },
-    )
-
-    TopBottomBarSettingsSheet(
-        show = state.activeSheet == ThemeConfigSheet.TopBottomBar,
-        appShell = appShell,
-        theme = theme,
-        isMiuixEngine = ThemeResolver.resolveComposeEngine(appShell.composeEngine) == ComposeEngine.Miuix,
-        onDismissRequest = { onIntent(ThemeConfigIntent.DismissSheet) },
-        onIntent = onIntent,
+        onSelectIcon = { onIntent(ThemeConfigIntent.RequestNavigationIcon(it)) },
+        onClearIcon = { onIntent(ThemeConfigIntent.SelectNavigationIcon(it, "")) },
     )
 
 
@@ -1126,16 +1113,14 @@ fun ThemeConfigScreen(
         onDismissRequest = { onIntent(ThemeConfigIntent.DismissSheet) },
         onSelectFont = { onIntent(ThemeConfigIntent.SelectAppFont(it)) },
         onOpenFolderPicker = { onIntent(ThemeConfigIntent.RequestFontFolder) },
-        startAction = {
-            MediumTonalButton(
-                icon = Icons.Default.Delete,
-                contentDescription = stringResource(R.string.clear),
-                onClick = {
-                    onIntent(ThemeConfigIntent.ClearAppFont)
-                    onIntent(ThemeConfigIntent.DismissSheet)
-                }
-            )
-        },
+        startSheetAction = SheetAction(
+            icon = Icons.Default.Delete,
+            contentDescription = stringResource(R.string.clear),
+            onClick = {
+                onIntent(ThemeConfigIntent.ClearAppFont)
+                onIntent(ThemeConfigIntent.DismissSheet)
+            },
+        ),
         folderIcon = Icons.Default.Add,
         folderContentDescription = stringResource(R.string.select_folder),
         emptyText = stringResource(R.string.theme_config_no_font_files),
@@ -1192,7 +1177,7 @@ private fun BaseCardBorderColorSettingItem(
                         color.takeIf { it != 0 }?.let(::Color)
                             ?: LegadoTheme.colorScheme.outlineVariant
                     )
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                    .border(1.dp, LegadoTheme.colorScheme.outlineVariant, CircleShape)
             )
         }
     )
@@ -1309,15 +1294,24 @@ fun ThemeColorButton(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Card(
-            onClick = onClick,
-            modifier = Modifier.size(64.dp),
-            shape = RoundedCornerShape(16.dp),
-            border = if (isSelected) BorderStroke(
-                borderWidth,
-                LegadoTheme.colorScheme.primary
-            ) else null,
-            colors = CardDefaults.cardColors(containerColor = colors.surfaceContainer)
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(colors.surfaceContainer)
+                .then(
+                    if (isSelected) {
+                        Modifier.border(
+                            borderWidth,
+                            LegadoTheme.colorScheme.primary,
+                            RoundedCornerShape(16.dp)
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
+                .clickable(role = Role.Button, onClick = onClick),
+            contentAlignment = Alignment.Center,
         ) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -1362,10 +1356,10 @@ fun ThemeColorButton(
                             .clip(RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
+                        AppIcon(
                             imageVector = Icons.Default.Check,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            tint = LegadoTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -1412,13 +1406,13 @@ fun ThemeCard(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Card(
+        Box(
             modifier = Modifier
                 .width(128.dp)
-                .height(256.dp),
-            shape = MaterialTheme.shapes.large,
-            border = BorderStroke(1.dp, colors.primary),
-            colors = CardDefaults.cardColors(containerColor = colors.surface)
+                .height(256.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(colors.surface)
+                .border(1.dp, colors.primary, RoundedCornerShape(16.dp))
         ) {
             ConstraintLayout(
                 modifier = Modifier.fillMaxSize()
